@@ -1,7 +1,6 @@
 /**
  * Aizen — Claude Chat Workspace Application Logic
- * Pure Client-Side Implementation (No React, No Backend, No npm)
- * Connects directly to https://api.nghimmo.com/v1/messages
+ * Direct client-side integration with https://api.nghimmo.com/v1/messages
  */
 
 (function () {
@@ -12,14 +11,23 @@
     const STORAGE_KEY_API_KEY = 'aizen_api_key';
     const STORAGE_KEY_CONVERSATIONS = 'aizen_conversations';
     const STORAGE_KEY_CURRENT_ID = 'aizen_current_conv_id';
-    const STORAGE_KEY_MODEL = 'aizen_selected_model';
+    const STORAGE_KEY_MODELS = 'aizen_models_list';
+    const STORAGE_KEY_ACTIVE_MODEL_ID = 'aizen_active_model_id';
+
+    // Default System Models
+    const DEFAULT_MODELS = [
+        { id: 'nghi/claude-opus-5-thinking', name: 'Claude Opus 5 Thinking', isDefault: true },
+        { id: 'nghi/claude-opus-5', name: 'Claude Opus 5', isDefault: true }
+    ];
 
     // State Variables
-    let apiKey = localStorage.getItem(STORAGE_KEY_API_KEY) || '';
-    let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || 'claude-3-7-sonnet-20250219';
+    let apiKey = (localStorage.getItem(STORAGE_KEY_API_KEY) || '').trim();
+    let models = loadStoredModels();
+    let activeModelId = localStorage.getItem(STORAGE_KEY_ACTIVE_MODEL_ID) || 'nghi/claude-opus-5-thinking';
     let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVERSATIONS) || '[]');
     let currentConvId = localStorage.getItem(STORAGE_KEY_CURRENT_ID) || null;
-    let pendingAttachments = []; // Array of { file, type, name, dataUrl, mimeType, base64, textContent }
+    
+    let pendingAttachments = [];
     let isGenerating = false;
     let abortController = null;
 
@@ -34,11 +42,16 @@
         openApiKeyBtn: document.getElementById('openApiKeyBtn'),
         apiKeyStatusText: document.getElementById('apiKeyStatusText'),
         
-        modelSelect: document.getElementById('modelSelect'),
-        customModelInput: document.getElementById('customModelInput'),
+        openModelsBtn: document.getElementById('openModelsBtn'),
+        activeModelLabel: document.getElementById('activeModelLabel'),
         activeChatTitle: document.getElementById('activeChatTitle'),
+        
         exportChatBtn: document.getElementById('exportChatBtn'),
         clearChatBtn: document.getElementById('clearChatBtn'),
+        mobileMenuMoreBtn: document.getElementById('mobileMenuMoreBtn'),
+        mobileOverflowMenu: document.getElementById('mobileOverflowMenu'),
+        mobileExportBtn: document.getElementById('mobileExportBtn'),
+        mobileClearBtn: document.getElementById('mobileClearBtn'),
         
         chatViewport: document.getElementById('chatViewport'),
         welcomeContainer: document.getElementById('welcomeContainer'),
@@ -54,20 +67,54 @@
         attachFileBtn: document.getElementById('attachFileBtn'),
         sendBtn: document.getElementById('sendBtn'),
         
+        // API Key Modal
         apiKeyModal: document.getElementById('apiKeyModal'),
         closeApiKeyModal: document.getElementById('closeApiKeyModal'),
         apiKeyInput: document.getElementById('apiKeyInput'),
         saveApiKeyBtn: document.getElementById('saveApiKeyBtn'),
         clearApiKeyBtn: document.getElementById('clearApiKeyBtn'),
         testApiKeyBtn: document.getElementById('testApiKeyBtn'),
-        apiKeyNotice: document.getElementById('apiKeyNotice')
+        apiKeyNotice: document.getElementById('apiKeyNotice'),
+
+        // Models Modal
+        modelsModal: document.getElementById('modelsModal'),
+        closeModelsModal: document.getElementById('closeModelsModal'),
+        modelList: document.getElementById('modelList'),
+        newModelName: document.getElementById('newModelName'),
+        newModelId: document.getElementById('newModelId'),
+        addCustomModelBtn: document.getElementById('addCustomModelBtn')
     };
 
-    // Initialize App
+    // Load models from localStorage or fallback
+    function loadStoredModels() {
+        try {
+            const stored = localStorage.getItem(STORAGE_KEY_MODELS);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed;
+                }
+            }
+        } catch (e) {
+            console.error('Error loading stored models:', e);
+        }
+        return [...DEFAULT_MODELS];
+    }
+
+    function saveModelsState() {
+        localStorage.setItem(STORAGE_KEY_MODELS, JSON.stringify(models));
+        localStorage.setItem(STORAGE_KEY_ACTIVE_MODEL_ID, activeModelId);
+    }
+
+    function getActiveModel() {
+        return models.find(m => m.id === activeModelId) || models[0] || DEFAULT_MODELS[0];
+    }
+
+    // App Initialization
     function init() {
         setupEventListeners();
         updateApiKeyUI();
-        initModelSelector();
+        updateActiveModelUI();
         
         if (!currentConvId && conversations.length > 0) {
             currentConvId = conversations[0].id;
@@ -77,9 +124,8 @@
         loadCurrentConversation();
     }
 
-    // Event Listeners Setup
     function setupEventListeners() {
-        // Sidebar Mobile Toggle
+        // Sidebar drawer
         elements.openSidebarBtn.addEventListener('click', () => {
             elements.sidebar.classList.add('open');
             elements.sidebarBackdrop.classList.add('active');
@@ -92,19 +138,35 @@
         elements.closeSidebarBtn.addEventListener('click', closeSidebar);
         elements.sidebarBackdrop.addEventListener('click', closeSidebar);
 
-        // New Chat & Clear Chat
+        // New & Clear Chat
         elements.newChatBtn.addEventListener('click', () => {
             createNewConversation();
             closeSidebar();
         });
         
-        elements.clearChatBtn.addEventListener('click', () => {
-            if (confirm('¿Deseas borrar los mensajes de esta conversación?')) {
-                clearCurrentChat();
-            }
+        elements.clearChatBtn.addEventListener('click', confirmClearChat);
+        elements.mobileClearBtn.addEventListener('click', () => {
+            elements.mobileOverflowMenu.classList.add('hidden');
+            confirmClearChat();
         });
 
         elements.exportChatBtn.addEventListener('click', exportCurrentChat);
+        elements.mobileExportBtn.addEventListener('click', () => {
+            elements.mobileOverflowMenu.classList.add('hidden');
+            exportCurrentChat();
+        });
+
+        // Mobile Overflow Menu
+        elements.mobileMenuMoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.mobileOverflowMenu.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!elements.mobileOverflowMenu.contains(e.target) && e.target !== elements.mobileMenuMoreBtn) {
+                elements.mobileOverflowMenu.classList.add('hidden');
+            }
+        });
 
         // API Key Modal
         elements.openApiKeyBtn.addEventListener('click', openApiKeyModal);
@@ -116,27 +178,15 @@
         elements.clearApiKeyBtn.addEventListener('click', clearApiKey);
         elements.testApiKeyBtn.addEventListener('click', testApiKeyConnection);
 
-        // Model Selector
-        elements.modelSelect.addEventListener('change', (e) => {
-            if (e.target.value === 'custom') {
-                elements.customModelInput.classList.remove('hidden');
-                elements.customModelInput.focus();
-            } else {
-                elements.customModelInput.classList.add('hidden');
-                selectedModel = e.target.value;
-                localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
-            }
+        // Model Manager Modal
+        elements.openModelsBtn.addEventListener('click', openModelsModal);
+        elements.closeModelsModal.addEventListener('click', closeModelsModal);
+        elements.modelsModal.addEventListener('click', (e) => {
+            if (e.target === elements.modelsModal) closeModelsModal();
         });
+        elements.addCustomModelBtn.addEventListener('click', handleAddCustomModel);
 
-        elements.customModelInput.addEventListener('change', (e) => {
-            const val = e.target.value.trim();
-            if (val) {
-                selectedModel = val;
-                localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
-            }
-        });
-
-        // Starter Prompt Cards
+        // Starter Cards
         document.querySelectorAll('.starter-card').forEach(card => {
             card.addEventListener('click', () => {
                 const prompt = card.getAttribute('data-prompt');
@@ -147,7 +197,7 @@
             });
         });
 
-        // Textarea Auto-Resize & Submit on Enter
+        // Textarea & Send
         elements.userInput.addEventListener('input', autoResizeTextarea);
         elements.userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -156,7 +206,6 @@
             }
         });
 
-        // Send Button
         elements.sendBtn.addEventListener('click', () => {
             if (isGenerating) {
                 stopGeneration();
@@ -165,37 +214,23 @@
             }
         });
 
-        // File Attachments
+        // Attachments
         elements.attachFileBtn.addEventListener('click', () => elements.fileInput.click());
         elements.fileInput.addEventListener('change', handleFileSelection);
 
-        // Error Banner Close
+        // Error banner
         elements.closeErrorBtn.addEventListener('click', hideError);
 
-        // Event Delegation for Code Blocks & Message Copy/Download
+        // Message Feed Actions
         elements.messagesFeed.addEventListener('click', handleFeedActions);
     }
 
-    // Auto-resize textarea
     function autoResizeTextarea() {
         elements.userInput.style.height = 'auto';
-        elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 200) + 'px';
+        elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 160) + 'px';
     }
 
-    // Model selector init
-    function initModelSelector() {
-        const matchingOption = Array.from(elements.modelSelect.options).find(opt => opt.value === selectedModel);
-        if (matchingOption) {
-            elements.modelSelect.value = selectedModel;
-            elements.customModelInput.classList.add('hidden');
-        } else {
-            elements.modelSelect.value = 'custom';
-            elements.customModelInput.classList.remove('hidden');
-            elements.customModelInput.value = selectedModel;
-        }
-    }
-
-    // API Key UI Update
+    // API Key Management (Preserves raw key)
     function updateApiKeyUI() {
         if (apiKey && apiKey.trim().length > 0) {
             elements.apiKeyStatusText.textContent = 'API Key: Guardada ✓';
@@ -207,7 +242,7 @@
     }
 
     function openApiKeyModal() {
-        elements.apiKeyInput.value = apiKey;
+        elements.apiKeyInput.value = apiKey; // Show current key value
         elements.apiKeyNotice.className = 'modal-notice hidden';
         elements.apiKeyModal.classList.remove('hidden');
     }
@@ -217,12 +252,12 @@
     }
 
     function saveApiKey() {
-        const key = elements.apiKeyInput.value.trim();
-        apiKey = key;
-        localStorage.setItem(STORAGE_KEY_API_KEY, key);
+        const rawKey = elements.apiKeyInput.value.trim();
+        apiKey = rawKey;
+        localStorage.setItem(STORAGE_KEY_API_KEY, rawKey);
         updateApiKeyUI();
-        showModalNotice('API Key guardada correctamente.', 'success');
-        setTimeout(closeApiKeyModal, 1000);
+        showModalNotice('API Key guardada en el navegador.', 'success');
+        setTimeout(closeApiKeyModal, 800);
     }
 
     function clearApiKey() {
@@ -236,13 +271,14 @@
     async function testApiKeyConnection() {
         const keyToTest = elements.apiKeyInput.value.trim() || apiKey;
         if (!keyToTest) {
-            showModalNotice('Por favor ingresa una API Key para probar.', 'error');
+            showModalNotice('Por favor ingresa una API Key.', 'error');
             return;
         }
 
-        showModalNotice('Probando conexión con nghimmo.com...', 'success');
+        showModalNotice('Probando conexión con nghimmo API...', 'success');
 
         try {
+            const activeModel = getActiveModel();
             const response = await fetch(API_ENDPOINT, {
                 method: 'POST',
                 headers: {
@@ -251,7 +287,7 @@
                     'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                    model: selectedModel,
+                    model: activeModel.id,
                     max_tokens: 10,
                     messages: [{ role: 'user', content: 'Ping' }],
                     stream: false
@@ -259,19 +295,102 @@
             });
 
             if (response.ok) {
-                showModalNotice('¡Conexión exitosa! La API Key es válida.', 'success');
+                showModalNotice('Conexión exitosa. API Key válida.', 'success');
             } else {
                 const errText = await response.text();
                 showModalNotice(`Error HTTP ${response.status}: ${errText.slice(0, 100)}`, 'error');
             }
         } catch (err) {
-            showModalNotice(`Error de conexión / CORS: ${err.message}`, 'error');
+            showModalNotice(`Error de conexión / Red: ${err.message}`, 'error');
         }
     }
 
     function showModalNotice(msg, type) {
         elements.apiKeyNotice.textContent = msg;
         elements.apiKeyNotice.className = `modal-notice ${type}`;
+    }
+
+    // Model Manager Modal
+    function updateActiveModelUI() {
+        const activeModel = getActiveModel();
+        elements.activeModelLabel.textContent = activeModel.name;
+    }
+
+    function openModelsModal() {
+        renderModelsList();
+        elements.modelsModal.classList.remove('hidden');
+    }
+
+    function closeModelsModal() {
+        elements.modelsModal.classList.add('hidden');
+    }
+
+    function renderModelsList() {
+        elements.modelList.innerHTML = models.map(m => {
+            const isActive = m.id === activeModelId;
+            const canDelete = !m.isDefault;
+
+            return `
+                <div class="model-item ${isActive ? 'active' : ''}" data-id="${m.id}">
+                    <div class="model-info">
+                        <span class="model-name">${escapeHtml(m.name)} ${isActive ? '✓' : ''}</span>
+                        <span class="model-id-badge">ID: ${escapeHtml(m.id)}</span>
+                    </div>
+                    <div class="model-item-actions">
+                        ${!isActive ? `<button class="model-btn-sm select-model-btn" data-id="${m.id}">Usar</button>` : '<span class="active-badge">Activo</span>'}
+                        ${canDelete ? `<button class="model-btn-sm delete-model-btn" data-id="${m.id}">&times;</button>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        elements.modelList.querySelectorAll('.select-model-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                activeModelId = btn.getAttribute('data-id');
+                saveModelsState();
+                updateActiveModelUI();
+                renderModelsList();
+            });
+        });
+
+        elements.modelList.querySelectorAll('.delete-model-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idToDelete = btn.getAttribute('data-id');
+                models = models.filter(m => m.id !== idToDelete);
+                if (activeModelId === idToDelete) {
+                    activeModelId = DEFAULT_MODELS[0].id;
+                }
+                saveModelsState();
+                updateActiveModelUI();
+                renderModelsList();
+            });
+        });
+    }
+
+    function handleAddCustomModel() {
+        const name = elements.newModelName.value.trim();
+        const id = elements.newModelId.value.trim();
+
+        if (!name || !id) {
+            alert('Por favor ingresa tanto el nombre como el ID exacto del modelo.');
+            return;
+        }
+
+        if (models.some(m => m.id === id)) {
+            alert('Ya existe un modelo registrado con ese ID.');
+            return;
+        }
+
+        models.push({ id, name, isDefault: false });
+        activeModelId = id; // Set as active
+        saveModelsState();
+        updateActiveModelUI();
+        renderModelsList();
+
+        elements.newModelName.value = '';
+        elements.newModelId.value = '';
     }
 
     // File Attachment Logic
@@ -288,14 +407,7 @@
                 reader.onload = (evt) => {
                     const dataUrl = evt.target.result;
                     const base64Data = dataUrl.split(',')[1];
-                    pendingAttachments.push({
-                        file,
-                        type: 'image',
-                        name: fileName,
-                        mimeType,
-                        dataUrl,
-                        base64: base64Data
-                    });
+                    pendingAttachments.push({ file, type: 'image', name: fileName, mimeType, dataUrl, base64: base64Data });
                     renderAttachmentsPreview();
                 };
                 reader.readAsDataURL(file);
@@ -303,28 +415,14 @@
                 reader.onload = (evt) => {
                     const dataUrl = evt.target.result;
                     const base64Data = dataUrl.split(',')[1];
-                    pendingAttachments.push({
-                        file,
-                        type: 'pdf',
-                        name: fileName,
-                        mimeType: 'application/pdf',
-                        dataUrl,
-                        base64: base64Data
-                    });
+                    pendingAttachments.push({ file, type: 'pdf', name: fileName, mimeType: 'application/pdf', dataUrl, base64: base64Data });
                     renderAttachmentsPreview();
                 };
                 reader.readAsDataURL(file);
             } else {
-                // Text or Code file
                 reader.onload = (evt) => {
                     const textContent = evt.target.result;
-                    pendingAttachments.push({
-                        file,
-                        type: 'text',
-                        name: fileName,
-                        mimeType,
-                        textContent
-                    });
+                    pendingAttachments.push({ file, type: 'text', name: fileName, mimeType, textContent });
                     renderAttachmentsPreview();
                 };
                 reader.readAsText(file);
@@ -364,14 +462,15 @@
         return '📝';
     }
 
-    // Conversation Storage Management
+    // Conversations Storage
     function createNewConversation() {
         const id = 'conv_' + Date.now();
+        const activeModel = getActiveModel();
         const newConv = {
             id,
             title: 'Nueva conversación',
             created_at: new Date().toISOString(),
-            model: selectedModel,
+            model: activeModel.id,
             messages: []
         };
         conversations.unshift(newConv);
@@ -425,6 +524,12 @@
         loadCurrentConversation();
     }
 
+    function confirmClearChat() {
+        if (confirm('¿Deseas borrar los mensajes de esta conversación?')) {
+            clearCurrentChat();
+        }
+    }
+
     function clearCurrentChat() {
         const conv = getCurrentConversation();
         if (conv) {
@@ -454,7 +559,7 @@
         scrollToBottom();
     }
 
-    // Message HTML Renderer
+    // Message Renderer
     function renderMessageHTML(msg) {
         const isUser = msg.role === 'user';
         const roleName = isUser ? 'Tú' : 'Aizen (Claude)';
@@ -470,12 +575,7 @@
             }).join('') + `</div>`;
         }
 
-        let bodyHTML = '';
-        if (isUser) {
-            bodyHTML = `<p>${escapeHtml(msg.text || '').replace(/\n/g, '<br>')}</p>`;
-        } else {
-            bodyHTML = parseMarkdown(msg.text || '');
-        }
+        let bodyHTML = isUser ? `<p>${escapeHtml(msg.text || '').replace(/\n/g, '<br>')}</p>` : parseMarkdown(msg.text || '');
 
         const actionsHTML = !isUser ? `
             <div class="message-actions">
@@ -505,11 +605,10 @@
         `;
     }
 
-    // Markdown Parser
+    // Markdown Parser with single clean buttons
     function parseMarkdown(text) {
         if (!text) return '';
 
-        // Extract Code Blocks first
         const codeBlocks = [];
         let html = text.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
             const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
@@ -517,34 +616,20 @@
             return placeholder;
         });
 
-        // HTML Escape
         html = escapeHtml(html);
-
-        // Headers
         html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-        html = html.replace(/^## (.*$)/gim, '2>$1</h2>');
+        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
         html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-
-        // Bold & Italic
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-        // Inline Code
         html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-
-        // Blockquotes
         html = html.replace(/^\&gt;\s?(.*$)/gim, '<blockquote>$1</blockquote>');
-
-        // Lists
         html = html.replace(/^\s*[\-\*]\s+(.*$)/gim, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>)/gms, '<ul>$1</ul>');
-
-        // Paragraphs & Linebreaks
         html = html.replace(/\n\n/g, '</p><p>');
         html = html.replace(/\n/g, '<br>');
         html = `<p>${html}</p>`;
 
-        // Re-insert Code Blocks
         codeBlocks.forEach((cb, idx) => {
             const codeEscaped = escapeHtml(cb.code);
             const blockHTML = `
@@ -574,7 +659,6 @@
             .replace(/'/g, '&#039;');
     }
 
-    // Handle Copy & Download Click Events
     function handleFeedActions(e) {
         const copyBtn = e.target.closest('.copy-msg-btn');
         if (copyBtn) {
@@ -587,7 +671,7 @@
         const downloadBtn = e.target.closest('.download-msg-btn');
         if (downloadBtn) {
             const rawText = decodeURIComponent(downloadBtn.getAttribute('data-text'));
-            downloadFile(rawText, `respuesta-aizen-${Date.now()}.md`, 'text/markdown');
+            downloadFile(rawText, `aizen-respuesta-${Date.now()}.md`, 'text/markdown');
             return;
         }
 
@@ -633,14 +717,15 @@
             python: 'py', py: 'py', html: 'html', css: 'css',
             json: 'json', md: 'md', c: 'c', cpp: 'cpp', java: 'java'
         };
-        return map[lang.toLowerCase()] || 'txt';
+        return map[(lang || '').toLowerCase()] || 'txt';
     }
 
-    // Send Message Logic
+    // Send Message & Streaming Logic
     async function sendMessage() {
-        if (!apiKey) {
+        const cleanApiKey = (apiKey || '').trim();
+        if (!cleanApiKey) {
             openApiKeyModal();
-            showModalNotice('Debes configurar una API Key de Nghimmo para comenzar.', 'error');
+            showModalNotice('Ingresa tu API Key de Nghimmo para continuar.', 'error');
             return;
         }
 
@@ -654,13 +739,11 @@
         const conv = getCurrentConversation();
         if (!conv) return;
 
-        // Auto-set title on first user message
         if (conv.messages.length === 0) {
             conv.title = textPrompt.slice(0, 30) || 'Adjunto enviado';
             elements.activeChatTitle.textContent = conv.title;
         }
 
-        // Build User Message Payload
         const userMsg = {
             role: 'user',
             text: textPrompt,
@@ -671,62 +754,61 @@
         conv.messages.push(userMsg);
         saveConversationsToStorage();
 
-        // Clear input area & hide welcome
         elements.userInput.value = '';
         autoResizeTextarea();
         pendingAttachments = [];
         renderAttachmentsPreview();
         elements.welcomeContainer.style.display = 'none';
 
-        // Render User Message in UI
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(userMsg));
         scrollToBottom();
 
-        // Prepare Assistant Stream Message Placeholder
         const assistantMsgPlaceholder = {
             role: 'assistant',
             text: '',
             timestamp: new Date().toISOString()
         };
 
-        const placeholderIndex = conv.messages.length;
         conv.messages.push(assistantMsgPlaceholder);
 
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(assistantMsgPlaceholder));
-        const messageElements = elements.messagesFeed.querySelectorAll('.message-item.assistant');
-        const currentAssistantElem = messageElements[messageElements.length - 1];
+        const assistantElems = elements.messagesFeed.querySelectorAll('.message-item.assistant');
+        const currentAssistantElem = assistantElems[assistantElems.length - 1];
         const textContainer = currentAssistantElem.querySelector('.message-text');
 
         textContainer.innerHTML = '<span class="streaming-cursor"></span>';
         scrollToBottom();
 
-        // Prepare Anthropic Messages Request
-        const anthropicMessages = conv.messages.slice(0, placeholderIndex).map(m => {
-            const role = m.role;
-            let content = [];
+        // Build Clean Anthropic History Payload (Excludes empty/failed messages)
+        const activeModel = getActiveModel();
+        const messagesHistory = [];
 
-            if (m.attachments && m.attachments.length) {
+        conv.messages.forEach(m => {
+            if (m === assistantMsgPlaceholder) return; // Skip current placeholder
+
+            if (m.role !== 'user' && m.role !== 'assistant') return;
+
+            const hasText = m.text && m.text.trim().length > 0;
+            const hasAtt = m.attachments && m.attachments.length > 0;
+
+            if (!hasText && !hasAtt) return;
+
+            let contentArr = [];
+
+            if (hasAtt) {
                 m.attachments.forEach(att => {
                     if (att.type === 'image') {
-                        content.push({
+                        contentArr.push({
                             type: 'image',
-                            source: {
-                                type: 'base64',
-                                media_type: att.mimeType,
-                                data: att.base64
-                            }
+                            source: { type: 'base64', media_type: att.mimeType, data: att.base64 }
                         });
                     } else if (att.type === 'pdf') {
-                        content.push({
+                        contentArr.push({
                             type: 'document',
-                            source: {
-                                type: 'base64',
-                                media_type: 'application/pdf',
-                                data: att.base64
-                            }
+                            source: { type: 'base64', media_type: 'application/pdf', data: att.base64 }
                         });
                     } else if (att.type === 'text') {
-                        content.push({
+                        contentArr.push({
                             type: 'text',
                             text: `[Archivo: ${att.name}]\n\`\`\`\n${att.textContent}\n\`\`\`\n`
                         });
@@ -734,14 +816,16 @@
                 });
             }
 
-            if (m.text) {
-                content.push({ type: 'text', text: m.text });
+            if (hasText) {
+                contentArr.push({ type: 'text', text: m.text });
             }
 
-            return { role, content };
+            messagesHistory.push({
+                role: m.role,
+                content: contentArr.length === 1 && contentArr[0].type === 'text' ? contentArr[0].text : contentArr
+            });
         });
 
-        // Set UI Generating State
         setGeneratingState(true);
         abortController = new AbortController();
 
@@ -750,24 +834,23 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': apiKey,
+                    'x-api-key': cleanApiKey,
                     'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                    model: selectedModel,
+                    model: activeModel.id,
                     max_tokens: 4096,
-                    messages: anthropicMessages,
+                    messages: messagesHistory,
                     stream: true
                 }),
                 signal: abortController.signal
             });
 
             if (!response.ok) {
-                const errBody = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errBody}`);
+                const errText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errText}`);
             }
 
-            // Stream Reader
             const reader = response.body.getReader();
             const decoder = new TextDecoder('utf-8');
             let fullText = '';
@@ -779,7 +862,7 @@
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                buffer = lines.pop(); // Keep uncompleted line
+                buffer = lines.pop();
 
                 for (const line of lines) {
                     const trimmed = line.trim();
@@ -812,11 +895,9 @@
                 }
             }
 
-            // Finished streaming
             assistantMsgPlaceholder.text = fullText;
             textContainer.innerHTML = parseMarkdown(fullText);
-            
-            // Add action buttons
+
             const actionsHTML = `
                 <div class="message-actions">
                     <button class="action-icon-btn copy-msg-btn" data-text="${encodeURIComponent(fullText)}">
@@ -839,29 +920,15 @@
                 assistantMsgPlaceholder.text += '\n\n_[Generación detenida por el usuario.]_';
                 textContainer.innerHTML = parseMarkdown(assistantMsgPlaceholder.text);
             } else {
-                console.error('Connection error:', err);
-                showError('Error de conexión o CORS', formatErrorMessage(err));
-                conv.messages.pop(); // Remove placeholder if failed
+                console.error('API Error:', err);
+                showError(`Error en solicitud API`, err.message);
+                conv.messages.pop(); // Remove placeholder
             }
             saveConversationsToStorage();
         } finally {
             setGeneratingState(false);
             abortController = null;
         }
-    }
-
-    function formatErrorMessage(err) {
-        const msg = err.message || '';
-        if (msg.includes('Failed to fetch')) {
-            return 'No se pudo conectar con https://api.nghimmo.com/v1/messages. Esto puede deberse a bloqueos de CORS, problemas de red o certificado SSL. Por favor verifica tu conexión y la validez de tu API Key.';
-        }
-        if (msg.includes('HTTP 401') || msg.includes('HTTP 403')) {
-            return 'API Key inválida o no autorizada (HTTP 401/403). Por favor revisa la clave configurada en la esquina inferior izquierda.';
-        }
-        if (msg.includes('HTTP 429')) {
-            return 'Límite de peticiones alcanzado (HTTP 429 Rate Limit). Por favor espera unos segundos.';
-        }
-        return msg;
     }
 
     function stopGeneration() {
@@ -873,8 +940,8 @@
     function setGeneratingState(generating) {
         isGenerating = generating;
         if (generating) {
-            elements.sendBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
-            elements.sendBtn.title = 'Detener generación';
+            elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
+            elements.sendBtn.title = 'Detener';
         } else {
             elements.sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
             elements.sendBtn.title = 'Enviar mensaje';
@@ -894,11 +961,11 @@
     function exportCurrentChat() {
         const conv = getCurrentConversation();
         if (!conv || !conv.messages || conv.messages.length === 0) {
-            alert('No hay mensajes para exportar en esta conversación.');
+            alert('No hay mensajes para exportar.');
             return;
         }
 
-        let exportText = `# Aizen Conversation Export — ${conv.title}\n`;
+        let exportText = `# Aizen Chat Export — ${conv.title}\n`;
         exportText += `Fecha: ${new Date(conv.created_at).toLocaleString()}\n`;
         exportText += `Modelo: ${conv.model}\n\n---\n\n`;
 
@@ -916,6 +983,6 @@
         });
     }
 
-    // Run Init on Load
     document.addEventListener('DOMContentLoaded', init);
 })();
+EOF

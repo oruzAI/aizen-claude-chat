@@ -2,34 +2,33 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aizen — Claude Chat Workspace</title>
-    <!-- Google Fonts for typography inspired by Claude -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aizen — Claude Workspace</title>
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <!-- Favicon SVG -->
+    <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23D97757'><path d='M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z'/></svg>">
 </head>
 <body>
     <div class="app-layout">
-        <!-- Sidebar Navigation -->
+        <!-- Sidebar Navigation Drawer -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="brand">
                     <div class="brand-logo">
-                        <!-- Custom Aizen Emblem SVG -->
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 3L14.8 9.2L21 10.2L16.5 15L17.8 21L12 17.8L6.2 21L7.5 15L3 10.2L9.2 9.2L12 3Z" fill="#D97757"/>
                         </svg>
                     </div>
                     <div class="brand-text">
                         <span class="brand-name">Aizen</span>
-                        <span class="brand-tag">Claude AI</span>
+                        <span class="brand-tag">Workspace</span>
                     </div>
                 </div>
-                <button class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Cerrar panel lateral">
+                <button class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Cerrar lateral">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
@@ -40,10 +39,8 @@
             </button>
 
             <div class="conversations-section">
-                <div class="section-title">Historial reciente</div>
-                <div class="conv-list" id="convList">
-                    <!-- Dynamic conversation items rendered here -->
-                </div>
+                <div class="section-title">Conversaciones</div>
+                <div class="conv-list" id="convList"></div>
             </div>
 
             <div class="sidebar-footer">
@@ -57,95 +54,106 @@
             </div>
         </aside>
 
-        <!-- Sidebar Mobile Backdrop -->
+        <!-- Sidebar Backdrop for Mobile -->
         <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-        <!-- Main Workspace Area -->
+        <!-- Main Content Area -->
         <main class="main-content">
-            <!-- Top Header Navbar -->
+            <!-- Header Topbar -->
             <header class="topbar">
                 <div class="topbar-left">
-                    <button class="icon-btn mobile-menu-btn" id="openSidebarBtn" title="Abrir menú">
+                    <button class="icon-btn mobile-menu-btn" id="openSidebarBtn" title="Menú">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
                     </button>
 
-                    <!-- Model Selector -->
-                    <div class="model-selector-wrapper">
-                        <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        <select id="modelSelect" class="model-select">
-                            <option value="claude-3-7-sonnet-20250219" selected>Claude 3.7 Sonnet</option>
-                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                            <option value="custom">Otro modelo...</option>
-                        </select>
-                        <input type="text" id="customModelInput" class="custom-model-input hidden" placeholder="Nombre de modelo personalizado">
-                    </div>
+                    <!-- Model Manager Modal Trigger -->
+                    <button class="topbar-action-btn model-trigger-btn" id="openModelsBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        <span id="activeModelLabel" class="active-model-name">Claude Opus 5 Thinking</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
                 </div>
 
                 <div class="topbar-right">
                     <span id="activeChatTitle" class="chat-title-display">Nueva conversación</span>
                     
-                    <button class="topbar-action-btn" id="exportChatBtn" title="Exportar conversación (.md)">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                        <span class="btn-text">Exportar</span>
-                    </button>
+                    <!-- Desktop Actions -->
+                    <div class="desktop-actions">
+                        <button class="topbar-action-btn" id="exportChatBtn" title="Exportar conversación (.md)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            <span>Exportar</span>
+                        </button>
+                        <button class="topbar-action-btn" id="clearChatBtn" title="Limpiar chat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
 
-                    <button class="topbar-action-btn" id="clearChatBtn" title="Limpiar chat">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>
+                    <!-- Mobile Overflow Menu Trigger -->
+                    <div class="mobile-overflow-wrapper">
+                        <button class="icon-btn" id="mobileMenuMoreBtn" title="Más opciones">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                        </button>
+                        <div class="mobile-overflow-menu hidden" id="mobileOverflowMenu">
+                            <button class="menu-item-btn" id="mobileExportBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                                <span>Exportar Chat (.md)</span>
+                            </button>
+                            <button class="menu-item-btn" id="mobileClearBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                <span>Limpiar Conversación</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
-            <!-- Chat Area -->
+            <!-- Chat Viewport -->
             <div class="chat-viewport" id="chatViewport">
-                <!-- Welcome View (Shown when conversation is empty) -->
+                <!-- Welcome View -->
                 <div class="welcome-container" id="welcomeContainer">
                     <div class="welcome-emblem">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <svg width="44" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="#D97757"/>
                         </svg>
                     </div>
                     <h1 class="welcome-title">Bienvenido a Aizen</h1>
-                    <p class="welcome-subtitle">Chat elegante conectado directamente a los modelos Claude vía Nghimmo API.</p>
+                    <p class="welcome-subtitle">Chat directo con los modelos Claude vía Nghimmo API.</p>
 
                     <div class="starter-cards">
-                        <button class="starter-card" data-prompt="Explica el funcionamiento del streaming SSE en la API de Claude en español con ejemplos claros.">
+                        <button class="starter-card" data-prompt="Explica el concepto de recursividad y cómo funciona en JavaScript con ejemplos prácticos.">
                             <div class="card-icon">⚡</div>
                             <div class="card-text">
                                 <strong>Explicar conceptos</strong>
-                                <span>Streaming SSE en API de Claude</span>
+                                <span>Recursividad en JavaScript</span>
                             </div>
                         </button>
-                        <button class="starter-card" data-prompt="Escribe una función en JavaScript moderna para procesar archivos de texto e imágenes en Base64.">
+                        <button class="starter-card" data-prompt="Escribe un script en Python para leer un archivo CSV, limpiar los datos y guardarlos en JSON.">
                             <div class="card-icon">💻</div>
                             <div class="card-text">
                                 <strong>Escribir código</strong>
-                                <span>Función JS para procesar Base64 y texto</span>
+                                <span>Procesador de CSV en Python</span>
                             </div>
                         </button>
-                        <button class="starter-card" data-prompt="Ayúdame a redactar un informe profesional estructurado en formato Markdown.">
+                        <button class="starter-card" data-prompt="Redacta una propuesta de proyecto estructurada en Markdown con objetivos, metodología y entregables.">
                             <div class="card-icon">📝</div>
                             <div class="card-text">
                                 <strong>Redacción y síntesis</strong>
-                                <span>Informe profesional en Markdown</span>
+                                <span>Propuesta de proyecto en Markdown</span>
                             </div>
                         </button>
                     </div>
                 </div>
 
                 <!-- Messages Feed -->
-                <div class="messages-feed" id="messagesFeed">
-                    <!-- Message items dynamically appended here -->
-                </div>
+                <div class="messages-feed" id="messagesFeed"></div>
             </div>
 
-            <!-- Error Banner Container -->
+            <!-- Error Banner -->
             <div id="errorBanner" class="error-banner hidden">
                 <div class="error-icon">⚠️</div>
                 <div class="error-content">
-                    <strong id="errorTitle">Error de conexión</strong>
-                    <p id="errorMessage">No se pudo enviar la solicitud.</p>
+                    <strong id="errorTitle">Error de API</strong>
+                    <p id="errorMessage">Ha ocurrido un problema al procesar la solicitud.</p>
                 </div>
                 <button class="error-close" id="closeErrorBtn">&times;</button>
             </div>
@@ -153,11 +161,10 @@
             <!-- Floating Input Area -->
             <div class="input-area-wrapper">
                 <div class="input-card">
-                    <!-- File attachments chips preview -->
                     <div class="attachments-preview hidden" id="attachmentsPreview"></div>
 
                     <div class="input-row">
-                        <textarea id="userInput" placeholder="Envía un mensaje a Aizen (Claude)..." rows="1"></textarea>
+                        <textarea id="userInput" placeholder="Escribe un mensaje a Aizen..." rows="1"></textarea>
                     </div>
 
                     <div class="input-toolbar">
@@ -190,8 +197,8 @@
             </div>
             <div class="modal-body">
                 <p class="modal-desc">
-                    Tu API Key se almacena exclusivamente en tu navegador (<strong>localStorage</strong>) y se envía de forma directa a <code>https://api.nghimmo.com/v1/messages</code>.
-                    <strong>Nunca</strong> se guarda ni se sube a GitHub.
+                    Tu API Key se guarda exclusivamente en tu navegador (<strong>localStorage</strong>) y se envía de forma directa a <code>https://api.nghimmo.com/v1/messages</code>.
+                    <strong>Nunca</strong> se sube a GitHub ni se modifica automáticamente.
                 </p>
 
                 <div class="form-group">
@@ -206,6 +213,34 @@
                 </div>
 
                 <div id="apiKeyNotice" class="modal-notice hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Manager Modal (Chatbox Style) -->
+    <div class="modal-overlay hidden" id="modelsModal">
+        <div class="modal-card models-modal-card">
+            <div class="modal-header">
+                <h3>Administrador de Modelos</h3>
+                <button class="modal-close-btn" id="closeModelsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Selecciona el modelo activo o agrega modelos personalizados con su ID exacto de Nghimmo API.</p>
+
+                <div class="model-list" id="modelList"></div>
+
+                <div class="add-model-section">
+                    <h4 class="sub-title">Agregar modelo personalizado</h4>
+                    <div class="form-group">
+                        <label for="newModelName">Nombre o apodo</label>
+                        <input type="text" id="newModelName" placeholder="Ej: Mi Claude Personalizado">
+                    </div>
+                    <div class="form-group">
+                        <label for="newModelId">ID exacto del modelo</label>
+                        <input type="text" id="newModelId" placeholder="Ej: nghi/claude-opus-5-thinking">
+                    </div>
+                    <button class="btn btn-primary btn-full" id="addCustomModelBtn">Guardar Modelo</button>
+                </div>
             </div>
         </div>
     </div>

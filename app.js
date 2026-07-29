@@ -1,35 +1,37 @@
 /**
- * Aizen — Claude Chat Workspace Application Logic
- * Direct client-side integration with https://api.nghimmo.com/v1/messages
+ * Aizen — Claude Workspace Logic
+ * Pure Client-Side Implementation with Multi-Format File Processing & Real-Time Precision Timer
  */
 
 (function () {
     'use strict';
 
-    // API & LocalStorage Keys
+    // API & Storage Constants
     const API_ENDPOINT = 'https://api.nghimmo.com/v1/messages';
     const STORAGE_KEY_API_KEY = 'aizen_api_key';
     const STORAGE_KEY_CONVERSATIONS = 'aizen_conversations';
     const STORAGE_KEY_CURRENT_ID = 'aizen_current_conv_id';
-    const STORAGE_KEY_MODELS = 'aizen_models_list';
-    const STORAGE_KEY_ACTIVE_MODEL_ID = 'aizen_active_model_id';
-
-    // Default System Models
-    const DEFAULT_MODELS = [
-        { id: 'nghi/claude-opus-5-thinking', name: 'Claude Opus 5 Thinking', isDefault: true },
-        { id: 'nghi/claude-opus-5', name: 'Claude Opus 5', isDefault: true }
-    ];
+    const STORAGE_KEY_MODEL = 'aizen_model';
+    const STORAGE_KEY_EFFORT = 'aizen_effort';
+    const STORAGE_KEY_THEME = 'aizen_theme';
 
     // State Variables
     let apiKey = (localStorage.getItem(STORAGE_KEY_API_KEY) || '').trim();
-    let models = loadStoredModels();
-    let activeModelId = localStorage.getItem(STORAGE_KEY_ACTIVE_MODEL_ID) || 'nghi/claude-opus-5-thinking';
+    let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || 'nghi/claude-opus-5-thinking';
+    let selectedEffort = localStorage.getItem(STORAGE_KEY_EFFORT) || 'high';
+    let currentTheme = localStorage.getItem(STORAGE_KEY_THEME) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    
     let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVERSATIONS) || '[]');
     let currentConvId = localStorage.getItem(STORAGE_KEY_CURRENT_ID) || null;
     
-    let pendingAttachments = [];
+    let pendingAttachments = []; // Array of { id, file, type, name, sizeFormatted, status: 'processing'|'ready'|'error', content, base64 }
     let isGenerating = false;
     let abortController = null;
+
+    // Configure PDF.js worker
+    if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
 
     // DOM Elements
     const elements = {
@@ -42,15 +44,15 @@
         openApiKeyBtn: document.getElementById('openApiKeyBtn'),
         apiKeyStatusText: document.getElementById('apiKeyStatusText'),
         
-        openModelsBtn: document.getElementById('openModelsBtn'),
-        activeModelLabel: document.getElementById('activeModelLabel'),
+        modelSelect: document.getElementById('modelSelect'),
+        effortWrapper: document.getElementById('effortWrapper'),
+        effortSelect: document.getElementById('effortSelect'),
+        themeToggleBtn: document.getElementById('themeToggleBtn'),
         activeChatTitle: document.getElementById('activeChatTitle'),
         
-        exportChatBtn: document.getElementById('exportChatBtn'),
         clearChatBtn: document.getElementById('clearChatBtn'),
         mobileMenuMoreBtn: document.getElementById('mobileMenuMoreBtn'),
         mobileOverflowMenu: document.getElementById('mobileOverflowMenu'),
-        mobileExportBtn: document.getElementById('mobileExportBtn'),
         mobileClearBtn: document.getElementById('mobileClearBtn'),
         
         chatViewport: document.getElementById('chatViewport'),
@@ -67,54 +69,21 @@
         attachFileBtn: document.getElementById('attachFileBtn'),
         sendBtn: document.getElementById('sendBtn'),
         
-        // API Key Modal
         apiKeyModal: document.getElementById('apiKeyModal'),
         closeApiKeyModal: document.getElementById('closeApiKeyModal'),
         apiKeyInput: document.getElementById('apiKeyInput'),
         saveApiKeyBtn: document.getElementById('saveApiKeyBtn'),
         clearApiKeyBtn: document.getElementById('clearApiKeyBtn'),
         testApiKeyBtn: document.getElementById('testApiKeyBtn'),
-        apiKeyNotice: document.getElementById('apiKeyNotice'),
-
-        // Models Modal
-        modelsModal: document.getElementById('modelsModal'),
-        closeModelsModal: document.getElementById('closeModelsModal'),
-        modelList: document.getElementById('modelList'),
-        newModelName: document.getElementById('newModelName'),
-        newModelId: document.getElementById('newModelId'),
-        addCustomModelBtn: document.getElementById('addCustomModelBtn')
+        apiKeyNotice: document.getElementById('apiKeyNotice')
     };
 
-    // Load models from localStorage or fallback
-    function loadStoredModels() {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY_MODELS);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    return parsed;
-                }
-            }
-        } catch (e) {
-            console.error('Error loading stored models:', e);
-        }
-        return [...DEFAULT_MODELS];
-    }
-
-    function saveModelsState() {
-        localStorage.setItem(STORAGE_KEY_MODELS, JSON.stringify(models));
-        localStorage.setItem(STORAGE_KEY_ACTIVE_MODEL_ID, activeModelId);
-    }
-
-    function getActiveModel() {
-        return models.find(m => m.id === activeModelId) || models[0] || DEFAULT_MODELS[0];
-    }
-
-    // App Initialization
+    // Initialize App
     function init() {
+        applyTheme(currentTheme);
         setupEventListeners();
         updateApiKeyUI();
-        updateActiveModelUI();
+        initSelectors();
         
         if (!currentConvId && conversations.length > 0) {
             currentConvId = conversations[0].id;
@@ -124,8 +93,31 @@
         loadCurrentConversation();
     }
 
+    // Theme Logic
+    function applyTheme(theme) {
+        currentTheme = theme;
+        localStorage.setItem(STORAGE_KEY_THEME, theme);
+        if (theme === 'dark') {
+            document.body.classList.add('dark-theme');
+            elements.themeToggleBtn.querySelector('.sun-icon').classList.add('hidden');
+            elements.themeToggleBtn.querySelector('.moon-icon').classList.remove('hidden');
+        } else {
+            document.body.classList.remove('dark-theme');
+            elements.themeToggleBtn.querySelector('.sun-icon').classList.remove('hidden');
+            elements.themeToggleBtn.querySelector('.moon-icon').classList.add('hidden');
+        }
+    }
+
+    function toggleTheme() {
+        applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    // Event Listeners Setup
     function setupEventListeners() {
-        // Sidebar drawer
+        // Theme Toggle
+        elements.themeToggleBtn.addEventListener('click', toggleTheme);
+
+        // Sidebar
         elements.openSidebarBtn.addEventListener('click', () => {
             elements.sidebar.classList.add('open');
             elements.sidebarBackdrop.classList.add('active');
@@ -150,12 +142,6 @@
             confirmClearChat();
         });
 
-        elements.exportChatBtn.addEventListener('click', exportCurrentChat);
-        elements.mobileExportBtn.addEventListener('click', () => {
-            elements.mobileOverflowMenu.classList.add('hidden');
-            exportCurrentChat();
-        });
-
         // Mobile Overflow Menu
         elements.mobileMenuMoreBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -168,6 +154,18 @@
             }
         });
 
+        // Selectors
+        elements.modelSelect.addEventListener('change', (e) => {
+            selectedModel = e.target.value;
+            localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+            checkEffortVisibility();
+        });
+
+        elements.effortSelect.addEventListener('change', (e) => {
+            selectedEffort = e.target.value;
+            localStorage.setItem(STORAGE_KEY_EFFORT, selectedEffort);
+        });
+
         // API Key Modal
         elements.openApiKeyBtn.addEventListener('click', openApiKeyModal);
         elements.closeApiKeyModal.addEventListener('click', closeApiKeyModal);
@@ -177,14 +175,6 @@
         elements.saveApiKeyBtn.addEventListener('click', saveApiKey);
         elements.clearApiKeyBtn.addEventListener('click', clearApiKey);
         elements.testApiKeyBtn.addEventListener('click', testApiKeyConnection);
-
-        // Model Manager Modal
-        elements.openModelsBtn.addEventListener('click', openModelsModal);
-        elements.closeModelsModal.addEventListener('click', closeModelsModal);
-        elements.modelsModal.addEventListener('click', (e) => {
-            if (e.target === elements.modelsModal) closeModelsModal();
-        });
-        elements.addCustomModelBtn.addEventListener('click', handleAddCustomModel);
 
         // Starter Cards
         document.querySelectorAll('.starter-card').forEach(card => {
@@ -218,10 +208,10 @@
         elements.attachFileBtn.addEventListener('click', () => elements.fileInput.click());
         elements.fileInput.addEventListener('change', handleFileSelection);
 
-        // Error banner
+        // Error Banner
         elements.closeErrorBtn.addEventListener('click', hideError);
 
-        // Message Feed Actions
+        // Event Delegation for Messages Feed
         elements.messagesFeed.addEventListener('click', handleFeedActions);
     }
 
@@ -230,19 +220,31 @@
         elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 160) + 'px';
     }
 
-    // API Key Management (Preserves raw key)
+    function initSelectors() {
+        elements.modelSelect.value = selectedModel;
+        elements.effortSelect.value = selectedEffort;
+        checkEffortVisibility();
+    }
+
+    function checkEffortVisibility() {
+        if (selectedModel === 'nghi/claude-haiku-4.5') {
+            elements.effortWrapper.style.display = 'none';
+        } else {
+            elements.effortWrapper.style.display = 'flex';
+        }
+    }
+
+    // API Key Modal Logic
     function updateApiKeyUI() {
         if (apiKey && apiKey.trim().length > 0) {
-            elements.apiKeyStatusText.textContent = 'API Key: Guardada ✓';
-            elements.apiKeyStatusText.style.color = 'var(--text-main)';
+            elements.apiKeyStatusText.textContent = 'API Key de Claude ✓';
         } else {
-            elements.apiKeyStatusText.textContent = 'API Key: Configurar ⚠️';
-            elements.apiKeyStatusText.style.color = '#E53935';
+            elements.apiKeyStatusText.textContent = 'API Key de Claude ⚠️';
         }
     }
 
     function openApiKeyModal() {
-        elements.apiKeyInput.value = apiKey; // Show current key value
+        elements.apiKeyInput.value = apiKey;
         elements.apiKeyNotice.className = 'modal-notice hidden';
         elements.apiKeyModal.classList.remove('hidden');
     }
@@ -256,8 +258,8 @@
         apiKey = rawKey;
         localStorage.setItem(STORAGE_KEY_API_KEY, rawKey);
         updateApiKeyUI();
-        showModalNotice('API Key guardada en el navegador.', 'success');
-        setTimeout(closeApiKeyModal, 800);
+        showModalNotice('Clave guardada.', 'success');
+        setTimeout(closeApiKeyModal, 700);
     }
 
     function clearApiKey() {
@@ -265,20 +267,19 @@
         localStorage.removeItem(STORAGE_KEY_API_KEY);
         elements.apiKeyInput.value = '';
         updateApiKeyUI();
-        showModalNotice('API Key eliminada.', 'error');
+        showModalNotice('Clave eliminada.', 'error');
     }
 
     async function testApiKeyConnection() {
         const keyToTest = elements.apiKeyInput.value.trim() || apiKey;
         if (!keyToTest) {
-            showModalNotice('Por favor ingresa una API Key.', 'error');
+            showModalNotice('Por favor ingresa una clave de API.', 'error');
             return;
         }
 
-        showModalNotice('Probando conexión con nghimmo API...', 'success');
+        showModalNotice('Probar conexión...', 'success');
 
         try {
-            const activeModel = getActiveModel();
             const response = await fetch(API_ENDPOINT, {
                 method: 'POST',
                 headers: {
@@ -287,7 +288,7 @@
                     'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                    model: activeModel.id,
+                    model: selectedModel,
                     max_tokens: 10,
                     messages: [{ role: 'user', content: 'Ping' }],
                     stream: false
@@ -295,13 +296,13 @@
             });
 
             if (response.ok) {
-                showModalNotice('Conexión exitosa. API Key válida.', 'success');
+                showModalNotice('Conexión exitosa. Clave válida.', 'success');
             } else {
                 const errText = await response.text();
-                showModalNotice(`Error HTTP ${response.status}: ${errText.slice(0, 100)}`, 'error');
+                showModalNotice(`Error HTTP ${response.status}: ${errText.slice(0, 80)}`, 'error');
             }
         } catch (err) {
-            showModalNotice(`Error de conexión / Red: ${err.message}`, 'error');
+            showModalNotice(`Error de conexión: ${err.message}`, 'error');
         }
     }
 
@@ -310,126 +311,172 @@
         elements.apiKeyNotice.className = `modal-notice ${type}`;
     }
 
-    // Model Manager Modal
-    function updateActiveModelUI() {
-        const activeModel = getActiveModel();
-        elements.activeModelLabel.textContent = activeModel.name;
-    }
-
-    function openModelsModal() {
-        renderModelsList();
-        elements.modelsModal.classList.remove('hidden');
-    }
-
-    function closeModelsModal() {
-        elements.modelsModal.classList.add('hidden');
-    }
-
-    function renderModelsList() {
-        elements.modelList.innerHTML = models.map(m => {
-            const isActive = m.id === activeModelId;
-            const canDelete = !m.isDefault;
-
-            return `
-                <div class="model-item ${isActive ? 'active' : ''}" data-id="${m.id}">
-                    <div class="model-info">
-                        <span class="model-name">${escapeHtml(m.name)} ${isActive ? '✓' : ''}</span>
-                        <span class="model-id-badge">ID: ${escapeHtml(m.id)}</span>
-                    </div>
-                    <div class="model-item-actions">
-                        ${!isActive ? `<button class="model-btn-sm select-model-btn" data-id="${m.id}">Usar</button>` : '<span class="active-badge">Activo</span>'}
-                        ${canDelete ? `<button class="model-btn-sm delete-model-btn" data-id="${m.id}">&times;</button>` : ''}
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        elements.modelList.querySelectorAll('.select-model-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                activeModelId = btn.getAttribute('data-id');
-                saveModelsState();
-                updateActiveModelUI();
-                renderModelsList();
-            });
-        });
-
-        elements.modelList.querySelectorAll('.delete-model-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idToDelete = btn.getAttribute('data-id');
-                models = models.filter(m => m.id !== idToDelete);
-                if (activeModelId === idToDelete) {
-                    activeModelId = DEFAULT_MODELS[0].id;
-                }
-                saveModelsState();
-                updateActiveModelUI();
-                renderModelsList();
-            });
-        });
-    }
-
-    function handleAddCustomModel() {
-        const name = elements.newModelName.value.trim();
-        const id = elements.newModelId.value.trim();
-
-        if (!name || !id) {
-            alert('Por favor ingresa tanto el nombre como el ID exacto del modelo.');
-            return;
-        }
-
-        if (models.some(m => m.id === id)) {
-            alert('Ya existe un modelo registrado con ese ID.');
-            return;
-        }
-
-        models.push({ id, name, isDefault: false });
-        activeModelId = id; // Set as active
-        saveModelsState();
-        updateActiveModelUI();
-        renderModelsList();
-
-        elements.newModelName.value = '';
-        elements.newModelId.value = '';
-    }
-
-    // File Attachment Logic
-    function handleFileSelection(e) {
+    // File Processing (Images, PDF, DOCX, XLSX, Text)
+    async function handleFileSelection(e) {
         const files = Array.from(e.target.files);
         if (!files.length) return;
 
-        files.forEach(file => {
-            const reader = new FileReader();
-            const fileName = file.name;
-            const mimeType = file.type || 'application/octet-stream';
+        // Disables Send button while processing
+        updateSendBtnState();
 
-            if (mimeType.startsWith('image/')) {
-                reader.onload = (evt) => {
-                    const dataUrl = evt.target.result;
-                    const base64Data = dataUrl.split(',')[1];
-                    pendingAttachments.push({ file, type: 'image', name: fileName, mimeType, dataUrl, base64: base64Data });
-                    renderAttachmentsPreview();
-                };
-                reader.readAsDataURL(file);
-            } else if (mimeType === 'application/pdf') {
-                reader.onload = (evt) => {
-                    const dataUrl = evt.target.result;
-                    const base64Data = dataUrl.split(',')[1];
-                    pendingAttachments.push({ file, type: 'pdf', name: fileName, mimeType: 'application/pdf', dataUrl, base64: base64Data });
-                    renderAttachmentsPreview();
-                };
-                reader.readAsDataURL(file);
-            } else {
-                reader.onload = (evt) => {
-                    const textContent = evt.target.result;
-                    pendingAttachments.push({ file, type: 'text', name: fileName, mimeType, textContent });
-                    renderAttachmentsPreview();
-                };
-                reader.readAsText(file);
+        for (const file of files) {
+            const fileId = 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+            const sizeFormatted = formatFileSize(file.size);
+            const attItem = {
+                id: fileId,
+                file,
+                name: file.name,
+                sizeFormatted,
+                type: getFileType(file.name, file.type),
+                status: 'processing',
+                content: '',
+                base64: ''
+            };
+
+            pendingAttachments.push(attItem);
+            renderAttachmentsPreview();
+
+            try {
+                if (file.size > 25 * 1024 * 1024) {
+                    throw new Error('El archivo supera el límite recomendado de 25MB.');
+                }
+
+                await processFileContent(attItem);
+                attItem.status = 'ready';
+            } catch (err) {
+                console.error('Error procesando archivo:', err);
+                attItem.status = 'error';
+                attItem.errorMsg = err.message;
+            } finally {
+                renderAttachmentsPreview();
+                updateSendBtnState();
             }
-        });
+        }
 
         elements.fileInput.value = '';
+    }
+
+    function getFileType(fileName, mimeType) {
+        const ext = (fileName.split('.').pop() || '').toLowerCase();
+        if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext) || mimeType.startsWith('image/')) return 'image';
+        if (ext === 'pdf') return 'pdf';
+        if (ext === 'docx') return 'docx';
+        if (['xlsx', 'xls'].includes(ext)) return 'xlsx';
+        return 'text';
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    async function processFileContent(att) {
+        const file = att.file;
+        const ext = att.name.split('.').pop().toLowerCase();
+
+        if (att.type === 'image') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    att.dataUrl = e.target.result;
+                    att.base64 = e.target.result.split(',')[1];
+                    att.mimeType = file.type || 'image/png';
+                    resolve();
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        if (att.type === 'pdf') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    att.dataUrl = e.target.result;
+                    att.base64 = e.target.result.split(',')[1];
+
+                    // Extract text with PDF.js if available
+                    if (window.pdfjsLib) {
+                        try {
+                            const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(e.target.result) });
+                            const pdf = await loadingTask.promise;
+                            let fullText = '';
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const content = await page.getTextContent();
+                                const strings = content.items.map(item => item.str);
+                                fullText += `--- Página ${i} ---\n` + strings.join(' ') + '\n\n';
+                            }
+                            att.content = fullText.trim();
+                        } catch (pdfErr) {
+                            console.warn('PDF.js text extraction fallback:', pdfErr);
+                        }
+                    }
+                    resolve();
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        if (att.type === 'docx') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    if (window.mammoth) {
+                        try {
+                            const result = await window.mammoth.extractRawText({ arrayBuffer: e.target.result });
+                            att.content = result.value;
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    } else {
+                        reject(new Error('Librería Mammoth.js no disponible'));
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        if (att.type === 'xlsx') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    if (window.XLSX) {
+                        try {
+                            const workbook = window.XLSX.read(e.target.result, { type: 'array' });
+                            let excelText = '';
+                            workbook.SheetNames.forEach(sheetName => {
+                                const csv = window.XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]);
+                                excelText += `=== Hoja: ${sheetName} ===\n${csv}\n\n`;
+                            });
+                            att.content = excelText.trim();
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    } else {
+                        reject(new Error('Librería SheetJS no disponible'));
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Plain Text / CSV / Code
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                att.content = e.target.result;
+                resolve();
+            };
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
     }
 
     function renderAttachmentsPreview() {
@@ -440,37 +487,51 @@
         }
 
         elements.attachmentsPreview.classList.remove('hidden');
-        elements.attachmentsPreview.innerHTML = pendingAttachments.map((att, idx) => `
-            <div class="preview-chip">
-                <span>${getAttachmentIcon(att.type)} ${escapeHtml(att.name)}</span>
-                <button type="button" class="chip-remove" data-idx="${idx}">&times;</button>
-            </div>
-        `).join('');
+        elements.attachmentsPreview.innerHTML = pendingAttachments.map((att, idx) => {
+            let statusHTML = '<span class="chip-status">Procesando...</span>';
+            if (att.status === 'ready') statusHTML = '<span class="chip-status ready">Listo ✓</span>';
+            if (att.status === 'error') statusHTML = `<span class="chip-status error" title="${escapeHtml(att.errorMsg)}">Error ✕</span>`;
+
+            return `
+                <div class="preview-chip">
+                    <span>${getAttachmentIcon(att.type)} ${escapeHtml(att.name)} (${att.sizeFormatted})</span>
+                    ${statusHTML}
+                    <button type="button" class="chip-remove" data-idx="${idx}">&times;</button>
+                </div>
+            `;
+        }).join('');
 
         elements.attachmentsPreview.querySelectorAll('.chip-remove').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const idx = parseInt(e.target.getAttribute('data-idx'), 10);
                 pendingAttachments.splice(idx, 1);
                 renderAttachmentsPreview();
+                updateSendBtnState();
             });
         });
+    }
+
+    function updateSendBtnState() {
+        const isProcessing = pendingAttachments.some(att => att.status === 'processing');
+        elements.sendBtn.disabled = isProcessing || isGenerating;
     }
 
     function getAttachmentIcon(type) {
         if (type === 'image') return '🖼️';
         if (type === 'pdf') return '📄';
+        if (type === 'docx') return '📘';
+        if (type === 'xlsx') return '📊';
         return '📝';
     }
 
-    // Conversations Storage
+    // Conversation Management
     function createNewConversation() {
         const id = 'conv_' + Date.now();
-        const activeModel = getActiveModel();
         const newConv = {
             id,
             title: 'Nueva conversación',
             created_at: new Date().toISOString(),
-            model: activeModel.id,
+            model: selectedModel,
             messages: []
         };
         conversations.unshift(newConv);
@@ -559,10 +620,50 @@
         scrollToBottom();
     }
 
-    // Message Renderer
+    // Precision Thinking Timer Renderer
+    function renderThinkingBoxHTML(durationSeconds, isThinking) {
+        let label = '';
+
+        if (isThinking) {
+            label = `Pensando… ${formatDuration(durationSeconds, true)}`;
+        } else {
+            label = `Pensó durante ${formatDuration(durationSeconds, false)}`;
+        }
+
+        return `
+            <div class="thinking-accordion">
+                <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <span class="thinking-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        <span class="timer-label">${escapeHtml(label)}</span>
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                </div>
+                <div class="thinking-body">Proceso de razonamiento del modelo completado.</div>
+            </div>
+        `;
+    }
+
+    function formatDuration(seconds, includeHundredths) {
+        const sec = Math.floor(seconds);
+        const hundredths = ((seconds % 1) * 100).toFixed(0).padStart(2, '0');
+        const hrs = Math.floor(sec / 3600);
+        const mins = Math.floor((sec % 3600) / 60);
+        const remainingSec = sec % 60;
+
+        if (hrs > 0) {
+            return `${hrs} hora${hrs > 1 ? 's' : ''} ${mins} min ${remainingSec} s`;
+        }
+        if (mins > 0) {
+            return `${mins} minuto${mins > 1 ? 's' : ''} ${remainingSec}${includeHundredths ? '.' + hundredths : ''} segundos`;
+        }
+        return `${remainingSec}${includeHundredths ? '.' + hundredths : ''} segundos`;
+    }
+
+    // Single Clean Action Bar Message Renderer
     function renderMessageHTML(msg) {
         const isUser = msg.role === 'user';
-        const roleName = isUser ? 'Tú' : 'Aizen (Claude)';
+        const roleName = isUser ? 'Tú' : 'Aizen';
         const avatarLetter = isUser ? 'U' : 'A';
 
         let attachmentsHTML = '';
@@ -575,6 +676,11 @@
             }).join('') + `</div>`;
         }
 
+        let thinkingHTML = '';
+        if (!isUser && msg.durationSeconds !== undefined) {
+            thinkingHTML = renderThinkingBoxHTML(msg.durationSeconds, false);
+        }
+
         let bodyHTML = isUser ? `<p>${escapeHtml(msg.text || '').replace(/\n/g, '<br>')}</p>` : parseMarkdown(msg.text || '');
 
         const actionsHTML = !isUser ? `
@@ -583,9 +689,26 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     <span>Copiar</span>
                 </button>
-                <button class="action-icon-btn download-msg-btn" data-text="${encodeURIComponent(msg.text || '')}">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                    <span>Descargar .md</span>
+                
+                <div class="download-wrapper">
+                    <button class="action-icon-btn download-trigger-btn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        <span>Descargar como ▾</span>
+                    </button>
+                    <div class="download-menu hidden">
+                        <button class="download-option" data-fmt="pdf" data-text="${encodeURIComponent(msg.text || '')}">Documento PDF (.pdf)</button>
+                        <button class="download-option" data-fmt="docx" data-text="${encodeURIComponent(msg.text || '')}">Documento Word (.docx)</button>
+                        <button class="download-option" data-fmt="xlsx" data-text="${encodeURIComponent(msg.text || '')}">Hoja Excel (.xlsx)</button>
+                        <button class="download-option" data-fmt="csv" data-text="${encodeURIComponent(msg.text || '')}">Tabla CSV (.csv)</button>
+                        <button class="download-option" data-fmt="md" data-text="${encodeURIComponent(msg.text || '')}">Markdown (.md)</button>
+                        <button class="download-option" data-fmt="txt" data-text="${encodeURIComponent(msg.text || '')}">Texto (.txt)</button>
+                        <button class="download-option" data-fmt="html" data-text="${encodeURIComponent(msg.text || '')}">Página Web (.html)</button>
+                    </div>
+                </div>
+
+                <button class="action-icon-btn regenerate-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <span>Regenerar</span>
                 </button>
             </div>
         ` : '';
@@ -598,6 +721,7 @@
                 </div>
                 <div class="message-bubble">
                     ${attachmentsHTML}
+                    ${thinkingHTML}
                     <div class="message-text">${bodyHTML}</div>
                     ${actionsHTML}
                 </div>
@@ -605,7 +729,7 @@
         `;
     }
 
-    // Markdown Parser with single clean buttons
+    // Markdown Parser
     function parseMarkdown(text) {
         if (!text) return '';
 
@@ -659,6 +783,7 @@
             .replace(/'/g, '&#039;');
     }
 
+    // Actions delegation
     function handleFeedActions(e) {
         const copyBtn = e.target.closest('.copy-msg-btn');
         if (copyBtn) {
@@ -668,10 +793,23 @@
             return;
         }
 
-        const downloadBtn = e.target.closest('.download-msg-btn');
-        if (downloadBtn) {
-            const rawText = decodeURIComponent(downloadBtn.getAttribute('data-text'));
-            downloadFile(rawText, `aizen-respuesta-${Date.now()}.md`, 'text/markdown');
+        const downloadTrigger = e.target.closest('.download-trigger-btn');
+        if (downloadTrigger) {
+            const menu = downloadTrigger.nextElementSibling;
+            document.querySelectorAll('.download-menu').forEach(m => {
+                if (m !== menu) m.classList.add('hidden');
+            });
+            menu.classList.toggle('hidden');
+            return;
+        }
+
+        const downloadOpt = e.target.closest('.download-option');
+        if (downloadOpt) {
+            const fmt = downloadOpt.getAttribute('data-fmt');
+            const rawText = decodeURIComponent(downloadOpt.getAttribute('data-text'));
+            const menu = downloadOpt.closest('.download-menu');
+            if (menu) menu.classList.add('hidden');
+            exportMessageAsFormat(rawText, fmt);
             return;
         }
 
@@ -688,7 +826,85 @@
             const rawCode = decodeURIComponent(downloadCodeBtn.getAttribute('data-code'));
             const lang = downloadCodeBtn.getAttribute('data-lang') || 'txt';
             const ext = getExtensionForLang(lang);
-            downloadFile(rawCode, `codigo-${Date.now()}.${ext}`, 'text/plain');
+            downloadBlobFile(rawCode, `codigo-${Date.now()}.${ext}`, 'text/plain');
+            return;
+        }
+
+        const regenBtn = e.target.closest('.regenerate-btn');
+        if (regenBtn) {
+            regenerateLastResponse();
+            return;
+        }
+    }
+
+    // Export Message into PDF, DOCX, XLSX, CSV, MD, TXT, HTML
+    function exportMessageAsFormat(rawText, format) {
+        const filename = `aizen-export-${Date.now()}`;
+
+        if (format === 'md') {
+            downloadBlobFile(rawText, `${filename}.md`, 'text/markdown');
+            return;
+        }
+        if (format === 'txt') {
+            downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+            return;
+        }
+        if (format === 'html') {
+            const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Aizen Export</title><style>body{font-family:sans-serif;padding:30px;line-height:1.6;}</style></head><body>${parseMarkdown(rawText)}</body></html>`;
+            downloadBlobFile(htmlContent, `${filename}.html`, 'text/html');
+            return;
+        }
+
+        if (format === 'pdf') {
+            if (window.html2pdf) {
+                const element = document.createElement('div');
+                element.style.padding = '20px';
+                element.style.fontFamily = 'sans-serif';
+                element.innerHTML = parseMarkdown(rawText);
+                window.html2pdf().from(element).save(`${filename}.pdf`);
+            } else {
+                downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+            }
+            return;
+        }
+
+        if (format === 'xlsx' || format === 'csv') {
+            if (window.XLSX) {
+                // Try extracting tables
+                const rows = [];
+                const lines = rawText.split('\n');
+                lines.forEach(l => {
+                    if (l.includes('|')) {
+                        const cells = l.split('|').map(c => c.trim()).filter(c => c);
+                        if (cells.length && !l.includes('---')) {
+                            rows.push(cells);
+                        }
+                    }
+                });
+
+                if (rows.length === 0) {
+                    rows.push(['Contenido'], [rawText]);
+                }
+
+                const ws = window.XLSX.utils.aoa_to_sheet(rows);
+                const wb = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(wb, ws, "Aizen Data");
+
+                if (format === 'csv') {
+                    window.XLSX.writeFile(wb, `${filename}.csv`, { bookType: 'csv' });
+                } else {
+                    window.XLSX.writeFile(wb, `${filename}.xlsx`);
+                }
+            } else {
+                downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+            }
+            return;
+        }
+
+        if (format === 'docx') {
+            // HTML-based Docx Blob fallback
+            const htmlDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Doc</title></head><body>${parseMarkdown(rawText)}</body></html>`;
+            downloadBlobFile(htmlDoc, `${filename}.docx`, 'application/msword');
             return;
         }
     }
@@ -699,7 +915,7 @@
         setTimeout(() => { btn.innerHTML = originalText; }, 1500);
     }
 
-    function downloadFile(content, fileName, mimeType) {
+    function downloadBlobFile(content, fileName, mimeType) {
         const blob = new Blob([content], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -720,17 +936,25 @@
         return map[(lang || '').toLowerCase()] || 'txt';
     }
 
-    // Send Message & Streaming Logic
+    // Send Message & Streaming Logic with Precision Timer
     async function sendMessage() {
         const cleanApiKey = (apiKey || '').trim();
         if (!cleanApiKey) {
             openApiKeyModal();
-            showModalNotice('Ingresa tu API Key de Nghimmo para continuar.', 'error');
+            showModalNotice('Ingresa tu API Key para continuar.', 'error');
+            return;
+        }
+
+        // Ensure no attachments are currently processing
+        if (pendingAttachments.some(att => att.status === 'processing')) {
+            alert('Espera a que los archivos terminen de procesarse.');
             return;
         }
 
         const textPrompt = elements.userInput.value.trim();
-        if (!textPrompt && pendingAttachments.length === 0) return;
+        const validAttachments = pendingAttachments.filter(att => att.status === 'ready');
+
+        if (!textPrompt && validAttachments.length === 0) return;
 
         if (!currentConvId) {
             createNewConversation();
@@ -747,7 +971,7 @@
         const userMsg = {
             role: 'user',
             text: textPrompt,
-            attachments: [...pendingAttachments],
+            attachments: [...validAttachments],
             timestamp: new Date().toISOString()
         };
 
@@ -763,9 +987,28 @@
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(userMsg));
         scrollToBottom();
 
+        await executeAssistantStreamingRequest(conv);
+    }
+
+    async function regenerateLastResponse() {
+        const conv = getCurrentConversation();
+        if (!conv || conv.messages.length === 0) return;
+
+        // If last message is assistant, pop it
+        if (conv.messages[conv.messages.length - 1].role === 'assistant') {
+            conv.messages.pop();
+            saveConversationsToStorage();
+            loadCurrentConversation();
+        }
+
+        await executeAssistantStreamingRequest(conv);
+    }
+
+    async function executeAssistantStreamingRequest(conv) {
         const assistantMsgPlaceholder = {
             role: 'assistant',
             text: '',
+            durationSeconds: 0,
             timestamp: new Date().toISOString()
         };
 
@@ -774,18 +1017,41 @@
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(assistantMsgPlaceholder));
         const assistantElems = elements.messagesFeed.querySelectorAll('.message-item.assistant');
         const currentAssistantElem = assistantElems[assistantElems.length - 1];
+        const bubbleElem = currentAssistantElem.querySelector('.message-bubble');
         const textContainer = currentAssistantElem.querySelector('.message-text');
+
+        // Precision Timer State
+        const startTime = performance.now();
+        let animationFrameId = null;
+
+        function updateTimer() {
+            const elapsedSeconds = (performance.now() - startTime) / 1000;
+            assistantMsgPlaceholder.durationSeconds = elapsedSeconds;
+
+            const existingThinking = bubbleElem.querySelector('.thinking-accordion');
+            const thinkingHTML = renderThinkingBoxHTML(elapsedSeconds, true);
+
+            if (existingThinking) {
+                existingThinking.outerHTML = thinkingHTML;
+            } else {
+                bubbleElem.insertAdjacentHTML('afterbegin', thinkingHTML);
+            }
+
+            if (isGenerating) {
+                animationFrameId = requestAnimationFrame(updateTimer);
+            }
+        }
+
+        setGeneratingState(true);
+        animationFrameId = requestAnimationFrame(updateTimer);
 
         textContainer.innerHTML = '<span class="streaming-cursor"></span>';
         scrollToBottom();
 
-        // Build Clean Anthropic History Payload (Excludes empty/failed messages)
-        const activeModel = getActiveModel();
+        // Build Clean Anthropic History Payload
         const messagesHistory = [];
-
         conv.messages.forEach(m => {
-            if (m === assistantMsgPlaceholder) return; // Skip current placeholder
-
+            if (m === assistantMsgPlaceholder) return;
             if (m.role !== 'user' && m.role !== 'assistant') return;
 
             const hasText = m.text && m.text.trim().length > 0;
@@ -802,15 +1068,15 @@
                             type: 'image',
                             source: { type: 'base64', media_type: att.mimeType, data: att.base64 }
                         });
-                    } else if (att.type === 'pdf') {
+                    } else if (att.type === 'pdf' && att.base64) {
                         contentArr.push({
                             type: 'document',
                             source: { type: 'base64', media_type: 'application/pdf', data: att.base64 }
                         });
-                    } else if (att.type === 'text') {
+                    } else if (att.content) {
                         contentArr.push({
                             type: 'text',
-                            text: `[Archivo: ${att.name}]\n\`\`\`\n${att.textContent}\n\`\`\`\n`
+                            text: `[Archivo: ${att.name}]\n\`\`\`\n${att.content}\n\`\`\`\n`
                         });
                     }
                 });
@@ -826,7 +1092,14 @@
             });
         });
 
-        setGeneratingState(true);
+        // Construct Request Payload
+        const requestPayload = {
+            model: selectedModel,
+            max_tokens: 4096,
+            messages: messagesHistory,
+            stream: true
+        };
+
         abortController = new AbortController();
 
         try {
@@ -834,15 +1107,10 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': cleanApiKey,
+                    'x-api-key': apiKey.trim(),
                     'anthropic-version': '2023-06-01'
                 },
-                body: JSON.stringify({
-                    model: activeModel.id,
-                    max_tokens: 4096,
-                    messages: messagesHistory,
-                    stream: true
-                }),
+                body: JSON.stringify(requestPayload),
                 signal: abortController.signal
             });
 
@@ -889,45 +1157,69 @@
                                 scrollToBottom();
                             }
                         } catch (e) {
-                            // Non-JSON or partial chunk line
+                            // Ignore partial JSON chunks
                         }
                     }
                 }
             }
 
+            // Finished streaming
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            const finalDuration = (performance.now() - startTime) / 1000;
+            assistantMsgPlaceholder.durationSeconds = finalDuration;
             assistantMsgPlaceholder.text = fullText;
-            textContainer.innerHTML = parseMarkdown(fullText);
 
-            const actionsHTML = `
+            // Final render
+            bubbleElem.innerHTML = `
+                ${renderThinkingBoxHTML(finalDuration, false)}
+                <div class="message-text">${parseMarkdown(fullText)}</div>
                 <div class="message-actions">
                     <button class="action-icon-btn copy-msg-btn" data-text="${encodeURIComponent(fullText)}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         <span>Copiar</span>
                     </button>
-                    <button class="action-icon-btn download-msg-btn" data-text="${encodeURIComponent(fullText)}">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                        <span>Descargar .md</span>
+                    
+                    <div class="download-wrapper">
+                        <button class="action-icon-btn download-trigger-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            <span>Descargar como ▾</span>
+                        </button>
+                        <div class="download-menu hidden">
+                            <button class="download-option" data-fmt="pdf" data-text="${encodeURIComponent(fullText)}">Documento PDF (.pdf)</button>
+                            <button class="download-option" data-fmt="docx" data-text="${encodeURIComponent(fullText)}">Documento Word (.docx)</button>
+                            <button class="download-option" data-fmt="xlsx" data-text="${encodeURIComponent(fullText)}">Hoja Excel (.xlsx)</button>
+                            <button class="download-option" data-fmt="csv" data-text="${encodeURIComponent(fullText)}">Tabla CSV (.csv)</button>
+                            <button class="download-option" data-fmt="md" data-text="${encodeURIComponent(fullText)}">Markdown (.md)</button>
+                            <button class="download-option" data-fmt="txt" data-text="${encodeURIComponent(fullText)}">Texto (.txt)</button>
+                            <button class="download-option" data-fmt="html" data-text="${encodeURIComponent(fullText)}">Página Web (.html)</button>
+                        </div>
+                    </div>
+
+                    <button class="action-icon-btn regenerate-btn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        <span>Regenerar</span>
                     </button>
                 </div>
             `;
-            currentAssistantElem.querySelector('.message-bubble').insertAdjacentHTML('beforeend', actionsHTML);
 
             saveConversationsToStorage();
             renderConversationsList();
 
         } catch (err) {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
             if (err.name === 'AbortError') {
-                assistantMsgPlaceholder.text += '\n\n_[Generación detenida por el usuario.]_';
+                assistantMsgPlaceholder.text += '\n\n_[Generación detenida.]_';
                 textContainer.innerHTML = parseMarkdown(assistantMsgPlaceholder.text);
             } else {
-                console.error('API Error:', err);
-                showError(`Error en solicitud API`, err.message);
-                conv.messages.pop(); // Remove placeholder
+                console.error('API Request Error:', err);
+                showError('Error en la solicitud API', err.message);
+                conv.messages.pop();
             }
             saveConversationsToStorage();
         } finally {
             setGeneratingState(false);
             abortController = null;
+            updateSendBtnState();
         }
     }
 
@@ -939,6 +1231,7 @@
 
     function setGeneratingState(generating) {
         isGenerating = generating;
+        updateSendBtnState();
         if (generating) {
             elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
             elements.sendBtn.title = 'Detener';
@@ -956,25 +1249,6 @@
 
     function hideError() {
         elements.errorBanner.classList.add('hidden');
-    }
-
-    function exportCurrentChat() {
-        const conv = getCurrentConversation();
-        if (!conv || !conv.messages || conv.messages.length === 0) {
-            alert('No hay mensajes para exportar.');
-            return;
-        }
-
-        let exportText = `# Aizen Chat Export — ${conv.title}\n`;
-        exportText += `Fecha: ${new Date(conv.created_at).toLocaleString()}\n`;
-        exportText += `Modelo: ${conv.model}\n\n---\n\n`;
-
-        conv.messages.forEach(m => {
-            const sender = m.role === 'user' ? '### 👤 Usuario' : '### 🤖 Aizen (Claude)';
-            exportText += `${sender}\n\n${m.text || ''}\n\n`;
-        });
-
-        downloadFile(exportText, `aizen-chat-${Date.now()}.md`, 'text/markdown');
     }
 
     function scrollToBottom() {

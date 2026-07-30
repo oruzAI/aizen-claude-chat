@@ -16,9 +16,9 @@
     const STORAGE_KEY_THEME = 'aizen_theme';
 
     // One-time effort migration to 'high'
-    if (!localStorage.getItem('aizen_effort_migrated_v2')) {
+    if (!localStorage.getItem('aizen_effort_migrated_v3')) {
         localStorage.setItem('aizen_effort', 'high');
-        localStorage.setItem('aizen_effort_migrated_v2', 'true');
+        localStorage.setItem('aizen_effort_migrated_v3', 'true');
     }
 
     // Models Map
@@ -50,9 +50,9 @@
     
     let pendingAttachments = []; // Array of { id, file, type, name, sizeFormatted, status: 'processing'|'ready'|'error', content, base64 }
     let isGenerating = false;
+    let isPreparingFile = false;
     let abortController = null;
     let activeReader = null;
-    let effortDisabledForSession = false;
     let dragCounter = 0;
 
     // Configure PDF.js worker
@@ -129,6 +129,7 @@
         
         renderConversationsList();
         loadCurrentConversation();
+        updateSendBtnState();
     }
 
     // Theme Manager
@@ -163,8 +164,6 @@
 
     // Drag and Drop Setup
     function setupDragAndDrop() {
-        const target = elements.chatViewport;
-
         window.addEventListener('dragenter', (e) => {
             e.preventDefault();
             dragCounter++;
@@ -258,11 +257,13 @@
                 localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
                 elements.modelMenu.classList.add('hidden');
                 updatePills();
+                updateSendBtnState();
             });
         });
 
         elements.effortPillBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (selectedModel === 'nghi/claude-haiku-4.5') return;
             elements.modelMenu.classList.add('hidden');
             elements.effortMenu.classList.toggle('hidden');
         });
@@ -273,6 +274,7 @@
                 localStorage.setItem(STORAGE_KEY_EFFORT, selectedEffort);
                 elements.effortMenu.classList.add('hidden');
                 updatePills();
+                updateSendBtnState();
             });
         });
 
@@ -298,7 +300,11 @@
         });
 
         // Textarea & Send / Stop
-        elements.userInput.addEventListener('input', autoResizeTextarea);
+        elements.userInput.addEventListener('input', () => {
+            autoResizeTextarea();
+            updateSendBtnState();
+        });
+
         elements.userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -336,7 +342,7 @@
 
     function autoResizeTextarea() {
         elements.userInput.style.height = 'auto';
-        elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 160) + 'px';
+        elements.userInput.style.height = Math.min(Math.max(elements.userInput.scrollHeight, 72), 180) + 'px';
     }
 
     function initPills() {
@@ -350,10 +356,14 @@
             item.classList.toggle('active', item.getAttribute('data-model') === selectedModel);
         });
 
-        if (selectedModel === 'nghi/claude-haiku-4.5' || effortDisabledForSession) {
-            elements.effortPillWrapper.style.display = 'none';
+        // Haiku 4.5 effort state: keep visible but dimmed with "Sin esfuerzo"
+        if (selectedModel === 'nghi/claude-haiku-4.5') {
+            elements.effortPillWrapper.style.display = 'block';
+            elements.effortPillBtn.classList.add('disabled');
+            elements.effortPillLabel.textContent = 'Sin esfuerzo';
         } else {
             elements.effortPillWrapper.style.display = 'block';
+            elements.effortPillBtn.classList.remove('disabled');
             elements.effortPillLabel.textContent = EFFORT_MAP[selectedEffort] || 'Alto';
             elements.effortMenu.querySelectorAll('.compositor-menu-item').forEach(item => {
                 item.classList.toggle('active', item.getAttribute('data-effort') === selectedEffort);
@@ -397,6 +407,7 @@
         updateApiKeyUI();
         showModalNotice('Clave guardada.', 'success');
         setTimeout(closeApiKeyModal, 600);
+        updateSendBtnState();
     }
 
     function clearApiKey() {
@@ -405,6 +416,7 @@
         elements.apiKeyInput.value = '';
         updateApiKeyUI();
         showModalNotice('Clave eliminada.', 'error');
+        updateSendBtnState();
     }
 
     async function testApiKeyConnection() {
@@ -453,6 +465,7 @@
         const files = Array.from(e.target.files);
         if (!files.length) return;
 
+        isPreparingFile = true;
         updateSendBtnState();
 
         for (const file of files) {
@@ -484,11 +497,12 @@
                 attItem.errorMsg = err.message;
             } finally {
                 renderAttachmentsPreview();
-                updateSendBtnState();
             }
         }
 
+        isPreparingFile = false;
         elements.fileInput.value = '';
+        updateSendBtnState();
     }
 
     function getFileType(fileName, mimeType) {
@@ -645,9 +659,24 @@
         });
     }
 
+    // Precise Send Button State Calculation
     function updateSendBtnState() {
-        const isProcessing = pendingAttachments.some(att => att.status === 'processing');
-        elements.sendBtn.disabled = isProcessing;
+        if (isGenerating) {
+            elements.sendBtn.disabled = false;
+            elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+            elements.sendBtn.title = 'Detener';
+            return;
+        }
+
+        elements.sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+        elements.sendBtn.title = 'Enviar mensaje';
+
+        const hasText = elements.userInput.value.trim().length > 0;
+        const hasReadyFiles = pendingAttachments.some(att => att.status === 'ready');
+        const hasProcessingFiles = pendingAttachments.some(att => att.status === 'processing');
+
+        const canSend = !isPreparingFile && !hasProcessingFiles && (hasText || hasReadyFiles);
+        elements.sendBtn.disabled = !canSend;
     }
 
     function getAttachmentIcon(type) {
@@ -688,7 +717,7 @@
         elements.convList.innerHTML = conversations.map(c => `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-id="${c.id}">
                 <span class="conv-title">${escapeHtml(c.title || 'Conversación')}</span>
-                <button class="conv-delete-btn" data-delete-id="${c.id}" title="Eliminar">&times;</button>
+                <button type="button" class="conv-delete-btn" data-delete-id="${c.id}" title="Eliminar">&times;</button>
             </div>
         `).join('');
 
@@ -782,7 +811,7 @@
         return `${remainingSec}${includeHundredths ? '.' + hundredths : ''} s`;
     }
 
-    // Message Renderer (Original Claude Look)
+    // Message Renderer (Original Claude Look with Clean Icon Actions on Completion)
     function renderMessageHTML(msg) {
         const isUser = msg.role === 'user';
 
@@ -801,51 +830,21 @@
             thinkingHTML = renderThinkingLineHTML(msg.durationSeconds, false);
         }
 
-        let generatedFileCardHTML = '';
-        if (!isUser && msg.generatedFile) {
-            const gf = msg.generatedFile;
-            generatedFileCardHTML = `
-                <div class="generated-file-card">
-                    <div class="file-card-info">
-                        <div class="file-card-icon">📄</div>
-                        <div class="file-card-details">
-                            <strong>${escapeHtml(gf.name)}</strong>
-                            <span>${escapeHtml(gf.typeLabel)} · ${escapeHtml(gf.size)}</span>
-                        </div>
-                    </div>
-                    <button class="file-download-btn" data-gen-download="${encodeURIComponent(gf.content)}" data-gen-name="${escapeHtml(gf.name)}" data-gen-fmt="${gf.format}">Descargar</button>
-                </div>
-            `;
-        }
-
         let bodyHTML = isUser ? `<p>${escapeHtml(msg.text || '').replace(/\n/g, '<br>')}</p>` : parseMarkdown(msg.text || '');
 
-        const actionsHTML = (!isUser && !isGenerating) ? `
+        // Action bar appears ONLY when completed (not while generating/thinking!)
+        const actionsHTML = (!isUser && !isGenerating && msg.status === 'completed') ? `
             <div class="message-actions">
-                <button class="action-icon-btn copy-msg-btn" data-text="${encodeURIComponent(msg.text || '')}">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    <span>Copiar todo</span>
+                <button type="button" class="action-icon-btn copy-msg-btn" title="Copiar" aria-label="Copiar" data-text="${encodeURIComponent(msg.text || '')}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 </button>
                 
-                <div class="download-wrapper">
-                    <button class="action-icon-btn download-trigger-btn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                        <span>Descargar como ▾</span>
-                    </button>
-                    <div class="download-menu hidden">
-                        <button class="download-option" data-fmt="pdf" data-text="${encodeURIComponent(msg.text || '')}">Documento PDF (.pdf)</button>
-                        <button class="download-option" data-fmt="docx" data-text="${encodeURIComponent(msg.text || '')}">Documento Word (.docx)</button>
-                        <button class="download-option" data-fmt="xlsx" data-text="${encodeURIComponent(msg.text || '')}">Hoja Excel (.xlsx)</button>
-                        <button class="download-option" data-fmt="csv" data-text="${encodeURIComponent(msg.text || '')}">Tabla CSV (.csv)</button>
-                        <button class="download-option" data-fmt="md" data-text="${encodeURIComponent(msg.text || '')}">Markdown (.md)</button>
-                        <button class="download-option" data-fmt="txt" data-text="${encodeURIComponent(msg.text || '')}">Texto (.txt)</button>
-                        <button class="download-option" data-fmt="html" data-text="${encodeURIComponent(msg.text || '')}">Página Web (.html)</button>
-                    </div>
-                </div>
+                <button type="button" class="action-icon-btn download-msg-btn" title="Descargar" aria-label="Descargar" data-text="${encodeURIComponent(msg.text || '')}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                </button>
 
-                <button class="action-icon-btn regenerate-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    <span>Regenerar</span>
+                <button type="button" class="action-icon-btn regenerate-btn" title="Regenerar" aria-label="Regenerar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 </button>
             </div>
         ` : '';
@@ -856,7 +855,6 @@
                     ${attachmentsHTML}
                     ${thinkingHTML}
                     <div class="message-text">${bodyHTML}</div>
-                    ${generatedFileCardHTML}
                     ${actionsHTML}
                 </div>
             </div>
@@ -895,8 +893,8 @@
                     <div class="code-header">
                         <span>${escapeHtml(cb.lang)}</span>
                         <div class="code-actions">
-                            <button class="code-action-btn copy-code-btn" data-code="${encodeURIComponent(cb.code)}">Copiar</button>
-                            <button class="code-action-btn download-code-btn" data-code="${encodeURIComponent(cb.code)}" data-lang="${escapeHtml(cb.lang)}">Descargar</button>
+                            <button type="button" class="code-action-btn copy-code-btn" data-code="${encodeURIComponent(cb.code)}">Copiar</button>
+                            <button type="button" class="code-action-btn download-code-btn" data-code="${encodeURIComponent(cb.code)}" data-lang="${escapeHtml(cb.lang)}">Descargar</button>
                         </div>
                     </div>
                     <pre><code>${codeEscaped}</code></pre>
@@ -917,7 +915,7 @@
             .replace(/'/g, '&#039;');
     }
 
-    // Actions delegation
+    // Feed Actions Delegation
     function handleFeedActions(e) {
         const copyBtn = e.target.closest('.copy-msg-btn');
         if (copyBtn) {
@@ -927,32 +925,10 @@
             return;
         }
 
-        const downloadTrigger = e.target.closest('.download-trigger-btn');
-        if (downloadTrigger) {
-            const menu = downloadTrigger.nextElementSibling;
-            document.querySelectorAll('.download-menu').forEach(m => {
-                if (m !== menu) m.classList.add('hidden');
-            });
-            menu.classList.toggle('hidden');
-            return;
-        }
-
-        const downloadOpt = e.target.closest('.download-option');
-        if (downloadOpt) {
-            const fmt = downloadOpt.getAttribute('data-fmt');
-            const rawText = decodeURIComponent(downloadOpt.getAttribute('data-text'));
-            const menu = downloadOpt.closest('.download-menu');
-            if (menu) menu.classList.add('hidden');
-            exportMessageAsFormat(rawText, fmt);
-            return;
-        }
-
-        const genDownloadBtn = e.target.closest('.file-download-btn');
-        if (genDownloadBtn) {
-            const content = decodeURIComponent(genDownloadBtn.getAttribute('data-gen-download'));
-            const name = genDownloadBtn.getAttribute('data-gen-name');
-            const fmt = genDownloadBtn.getAttribute('data-gen-fmt');
-            exportMessageAsFormat(content, fmt, name);
+        const downloadBtn = e.target.closest('.download-msg-btn');
+        if (downloadBtn) {
+            const rawText = decodeURIComponent(downloadBtn.getAttribute('data-text'));
+            smartDownloadResponse(rawText);
             return;
         }
 
@@ -968,8 +944,9 @@
         if (downloadCodeBtn) {
             const rawCode = decodeURIComponent(downloadCodeBtn.getAttribute('data-code'));
             const lang = downloadCodeBtn.getAttribute('data-lang') || 'txt';
-            const ext = getExtensionForLang(lang);
-            downloadBlobFile(rawCode, `codigo-${Date.now()}.${ext}`, 'text/plain');
+            const ext = lang.toLowerCase() === 'html' ? 'html' : getExtensionForLang(lang);
+            const mime = ext === 'html' ? 'text/html;charset=utf-8' : 'text/plain;charset=utf-8';
+            downloadBlobFile(rawCode, `codigo-${Date.now()}.${ext}`, mime);
             return;
         }
 
@@ -980,82 +957,37 @@
         }
     }
 
-    // Export Message into PDF, DOCX, XLSX, CSV, MD, TXT, HTML
-    function exportMessageAsFormat(rawText, format, customFilename) {
-        const filename = customFilename || `aizen-export-${Date.now()}.${format}`;
+    // Smart Download: Auto-detects complete HTML vs Plain Text (.html vs .txt ONLY)
+    function smartDownloadResponse(rawText) {
+        if (!rawText) return;
+        const lower = rawText.toLowerCase();
 
-        if (format === 'md') {
-            downloadBlobFile(rawText, filename.endsWith('.md') ? filename : `${filename}.md`, 'text/markdown');
-            return;
-        }
-        if (format === 'txt') {
-            downloadBlobFile(rawText, filename.endsWith('.txt') ? filename : `${filename}.txt`, 'text/plain');
-            return;
-        }
-        if (format === 'html') {
-            const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Aizen Export</title><style>body{font-family:sans-serif;padding:30px;line-height:1.6;}</style></head><body>${parseMarkdown(rawText)}</body></html>`;
-            downloadBlobFile(htmlContent, filename.endsWith('.html') ? filename : `${filename}.html`, 'text/html');
-            return;
-        }
+        const isFullHTML = (
+            lower.includes('<!doctype html') ||
+            lower.includes('<html') ||
+            (lower.includes('```html') && lower.includes('</html>'))
+        );
 
-        if (format === 'pdf') {
-            if (window.html2pdf) {
-                const element = document.createElement('div');
-                element.style.padding = '24px';
-                element.style.fontFamily = 'sans-serif';
-                element.style.backgroundColor = '#FFFFFF';
-                element.style.color = '#000000';
-                element.innerHTML = parseMarkdown(rawText);
-                window.html2pdf().from(element).save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
-            } else {
-                downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+        if (isFullHTML) {
+            let cleanHTML = rawText;
+            if (cleanHTML.includes('```html')) {
+                cleanHTML = cleanHTML.split('```html')[1].split('```')[0].trim();
+            } else if (cleanHTML.includes('```')) {
+                cleanHTML = cleanHTML.split('```')[1].split('```')[0].trim();
             }
-            return;
-        }
-
-        if (format === 'xlsx' || format === 'csv') {
-            if (window.XLSX) {
-                const rows = [];
-                const lines = rawText.split('\n');
-                lines.forEach(l => {
-                    if (l.includes('|')) {
-                        const cells = l.split('|').map(c => c.trim()).filter(c => c);
-                        if (cells.length && !l.includes('---')) {
-                            rows.push(cells);
-                        }
-                    }
-                });
-
-                if (rows.length === 0) {
-                    rows.push(['Contenido'], [rawText]);
-                }
-
-                const ws = window.XLSX.utils.aoa_to_sheet(rows);
-                const wb = window.XLSX.utils.book_new();
-                window.XLSX.utils.book_append_sheet(wb, ws, "Aizen Data");
-
-                if (format === 'csv') {
-                    window.XLSX.writeFile(wb, filename.endsWith('.csv') ? filename : `${filename}.csv`, { bookType: 'csv' });
-                } else {
-                    window.XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`);
-                }
-            } else {
-                downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+            if (!cleanHTML.toLowerCase().includes('<!doctype html>')) {
+                cleanHTML = `<!DOCTYPE html>\n<html lang="es">\n<head>\n<meta charset="UTF-8">\n<title>Aizen Document</title>\n</head>\n<body>\n${cleanHTML}\n</body>\n</html>`;
             }
-            return;
-        }
-
-        if (format === 'docx') {
-            const htmlDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Doc</title></head><body>${parseMarkdown(rawText)}</body></html>`;
-            downloadBlobFile(htmlDoc, filename.endsWith('.docx') ? filename : `${filename}.docx`, 'application/msword');
-            return;
+            downloadBlobFile(cleanHTML, `documento-aizen-${Date.now()}.html`, 'text/html;charset=utf-8');
+        } else {
+            downloadBlobFile(rawText, `respuesta-aizen-${Date.now()}.txt`, 'text/plain;charset=utf-8');
         }
     }
 
     function showToast(btn, text) {
-        const originalText = btn.innerHTML;
-        btn.innerHTML = `<span>${text}</span>`;
-        setTimeout(() => { btn.innerHTML = originalText; }, 1500);
+        const originalTitle = btn.getAttribute('title');
+        btn.setAttribute('title', text);
+        setTimeout(() => { if (originalTitle) btn.setAttribute('title', originalTitle); }, 1500);
     }
 
     function downloadBlobFile(content, fileName, mimeType) {
@@ -1079,15 +1011,14 @@
         return map[(lang || '').toLowerCase()] || 'txt';
     }
 
-    // Single-turn Model / Effort Question Detector
+    // Detect direct model or effort identity questions
     function isModelIdentityQuery(text) {
         if (!text) return false;
         const lower = text.toLowerCase();
         return (
             lower.includes('qué modelo') || lower.includes('que modelo') ||
             lower.includes('eres opus') || lower.includes('qué versión') ||
-            lower.includes('que version') || lower.includes('what model') ||
-            lower.includes('what version')
+            lower.includes('que version') || lower.includes('what model')
         );
     }
 
@@ -1101,30 +1032,12 @@
         );
     }
 
-    // Automatic File Delivery Detection
-    function detectFileGenerationRequest(text) {
-        if (!text) return null;
-        const lower = text.toLowerCase();
-        if (lower.includes('crea un pdf') || lower.includes('haz un pdf') || lower.includes('un libro') || lower.includes('generar pdf')) return 'pdf';
-        if (lower.includes('haz un excel') || lower.includes('crea un excel') || lower.includes('hoja de cálculo') || lower.includes('generar xlsx')) return 'xlsx';
-        if (lower.includes('genera un docx') || lower.includes('crea un word') || lower.includes('documento docx')) return 'docx';
-        if (lower.includes('crea un csv') || lower.includes('generar csv')) return 'csv';
-        if (lower.includes('entrégamelo como html') || lower.includes('crea un html')) return 'html';
-        if (lower.includes('dámelo en txt') || lower.includes('archivo txt')) return 'txt';
-        return null;
-    }
-
     // Send Message Logic
     async function sendMessage() {
         const cleanApiKey = (apiKey || '').trim();
         if (!cleanApiKey) {
             openApiKeyModal();
             showModalNotice('Ingresa tu API Key para continuar.', 'error');
-            return;
-        }
-
-        if (pendingAttachments.some(att => att.status === 'processing')) {
-            alert('Espera a que los archivos terminen de procesarse.');
             return;
         }
 
@@ -1145,13 +1058,10 @@
             elements.activeChatTitle.textContent = conv.title;
         }
 
-        const requestedFileFormat = detectFileGenerationRequest(textPrompt);
-
         const userMsg = {
             role: 'user',
             text: textPrompt,
             attachments: [...validAttachments],
-            requestedFileFormat,
             timestamp: new Date().toISOString()
         };
 
@@ -1165,11 +1075,36 @@
         elements.welcomeContainer.style.display = 'none';
 
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(userMsg));
-        
-        // Scroll ONCE to bottom when sending new message
         scrollToBottom();
 
-        await executeAssistantStreamingRequest(conv, requestedFileFormat, textPrompt);
+        // Local handling of identity queries without calling API
+        if (isModelIdentityQuery(textPrompt) || isEffortQuery(textPrompt)) {
+            const modelName = MODELS_MAP[selectedModel] || 'Opus 5 Thinking';
+            const effortName = selectedModel === 'nghi/claude-haiku-4.5' ? 'deshabilitado' : (EFFORT_MAP[selectedEffort] || 'Alto');
+            
+            let localResponse = `Soy Claude ${modelName}`;
+            if (selectedModel !== 'nghi/claude-haiku-4.5') {
+                localResponse += ` y estoy usando el nivel de esfuerzo ${effortName}.`;
+            } else {
+                localResponse += `.`;
+            }
+
+            const localAssistantMsg = {
+                role: 'assistant',
+                text: localResponse,
+                durationSeconds: 0,
+                status: 'completed',
+                timestamp: new Date().toISOString()
+            };
+            conv.messages.push(localAssistantMsg);
+            saveConversationsToStorage();
+            renderConversationsList();
+            loadCurrentConversation();
+            updateSendBtnState();
+            return;
+        }
+
+        await executeAssistantStreamingRequest(conv, textPrompt);
     }
 
     async function regenerateLastResponse() {
@@ -1183,13 +1118,12 @@
         }
 
         const lastUserMsg = [...conv.messages].reverse().find(m => m.role === 'user');
-        const requestedFormat = lastUserMsg ? lastUserMsg.requestedFileFormat : null;
         const promptText = lastUserMsg ? lastUserMsg.text : '';
 
-        await executeAssistantStreamingRequest(conv, requestedFormat, promptText);
+        await executeAssistantStreamingRequest(conv, promptText);
     }
 
-    async function executeAssistantStreamingRequest(conv, requestedFileFormat, promptText, isContinuation = false) {
+    async function executeAssistantStreamingRequest(conv, promptText, isContinuation = false) {
         let assistantMsgPlaceholder;
 
         if (isContinuation) {
@@ -1199,6 +1133,7 @@
                 role: 'assistant',
                 text: '',
                 durationSeconds: 0,
+                status: 'thinking',
                 timestamp: new Date().toISOString()
             };
             conv.messages.push(assistantMsgPlaceholder);
@@ -1210,29 +1145,27 @@
         const bubbleElem = currentAssistantElem.querySelector('.message-bubble');
         const textContainer = currentAssistantElem.querySelector('.message-text');
 
-        const startTime = performance.now();
-        let animationFrameId = null;
+        // Thinking Timer with Monotonic Freeze on First Token
+        const thinkingStartedAt = performance.now();
+        let thinkingFrozenMs = null;
+        let timerInterval = null;
 
-        function updateTimer() {
-            const elapsedSeconds = (performance.now() - startTime) / 1000;
-            assistantMsgPlaceholder.durationSeconds = elapsedSeconds;
-
+        function updateThinkingUI() {
+            if (thinkingFrozenMs !== null) return;
+            const currentElapsed = (performance.now() - thinkingStartedAt) / 1000;
             const existingThinking = bubbleElem.querySelector('.thinking-line');
-            const thinkingHTML = renderThinkingLineHTML(elapsedSeconds, true);
+            const thinkingHTML = renderThinkingLineHTML(currentElapsed, true);
 
             if (existingThinking) {
                 existingThinking.outerHTML = thinkingHTML;
             } else {
                 bubbleElem.insertAdjacentHTML('afterbegin', thinkingHTML);
             }
-
-            if (isGenerating) {
-                animationFrameId = requestAnimationFrame(updateTimer);
-            }
         }
 
         setGeneratingState(true);
-        animationFrameId = requestAnimationFrame(updateTimer);
+        timerInterval = setInterval(updateThinkingUI, 80);
+        updateThinkingUI();
 
         if (!isContinuation) {
             textContainer.innerHTML = '<span class="streaming-cursor"></span>';
@@ -1285,21 +1218,8 @@
         if (isContinuation) {
             messagesHistory.push({
                 role: 'user',
-                content: 'Continúa la respuesta anterior exactamente desde la última palabra sin repetir lo ya generado.'
+                content: 'Continúa exactamente desde el último carácter sin repetir nada de lo ya generado.'
             });
-        }
-
-        // Single-turn Identity Injection if asked
-        let systemPrompt = undefined;
-        const modelName = MODELS_MAP[selectedModel] || 'Opus 5 Thinking';
-        const effortName = EFFORT_MAP[selectedEffort] || 'Alto';
-
-        if (isModelIdentityQuery(promptText) && isEffortQuery(promptText)) {
-            systemPrompt = `El modelo seleccionado actualmente es ${modelName} y el nivel de esfuerzo es ${effortName}. Responde únicamente con esa información.`;
-        } else if (isModelIdentityQuery(promptText)) {
-            systemPrompt = `El modelo seleccionado actualmente es ${modelName}. Responde únicamente que eres ${modelName}.`;
-        } else if (isEffortQuery(promptText)) {
-            systemPrompt = `El nivel de esfuerzo seleccionado es ${effortName}. Responde únicamente que utilizas el nivel ${effortName}.`;
         }
 
         // Request Payload
@@ -1310,8 +1230,9 @@
             stream: true
         };
 
-        if (systemPrompt) {
-            requestPayload.system = systemPrompt;
+        // Add effort parameter if supported and selected model is not Haiku 4.5
+        if (selectedModel !== 'nghi/claude-haiku-4.5') {
+            requestPayload.effort = selectedEffort;
         }
 
         abortController = new AbortController();
@@ -1343,6 +1264,18 @@
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+
+                // Freeze thinking counter on first token arrival!
+                if (thinkingFrozenMs === null) {
+                    thinkingFrozenMs = performance.now() - thinkingStartedAt;
+                    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+                    assistantMsgPlaceholder.durationSeconds = thinkingFrozenMs / 1000;
+                    assistantMsgPlaceholder.status = 'streaming';
+                    const existingThinking = bubbleElem.querySelector('.thinking-line');
+                    if (existingThinking) {
+                        existingThinking.outerHTML = renderThinkingLineHTML(assistantMsgPlaceholder.durationSeconds, false);
+                    }
+                }
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
@@ -1382,41 +1315,37 @@
                 }
             }
 
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            const finalDuration = (performance.now() - startTime) / 1000;
-            assistantMsgPlaceholder.durationSeconds = (assistantMsgPlaceholder.durationSeconds || 0) + finalDuration;
+            // Guarantee timer frozen if stream finishes
+            if (thinkingFrozenMs === null) {
+                thinkingFrozenMs = performance.now() - thinkingStartedAt;
+                if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+                assistantMsgPlaceholder.durationSeconds = thinkingFrozenMs / 1000;
+            }
+
             assistantMsgPlaceholder.text = accumulatedText;
 
             // Handle Auto Continuation if max_tokens reached
             if (lastStopReason === 'max_tokens' || lastStopReason === 'length') {
                 saveConversationsToStorage();
-                return await executeAssistantStreamingRequest(conv, requestedFileFormat, promptText, true);
+                return await executeAssistantStreamingRequest(conv, promptText, true);
             }
 
-            // Automatic File Delivery Card Creation
-            if (requestedFileFormat) {
-                const extMap = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', csv: 'csv', html: 'html', txt: 'txt' };
-                const fmtExt = extMap[requestedFileFormat] || 'file';
-                const fileCardName = `documento-aizen.${fmtExt}`;
-
-                assistantMsgPlaceholder.generatedFile = {
-                    name: fileCardName,
-                    typeLabel: `Documento ${fmtExt.toUpperCase()}`,
-                    size: formatFileSize(accumulatedText.length),
-                    format: requestedFileFormat,
-                    content: accumulatedText
-                };
-            }
-
+            assistantMsgPlaceholder.status = 'completed';
             saveConversationsToStorage();
             renderConversationsList();
             loadCurrentConversation();
 
         } catch (err) {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+            if (thinkingFrozenMs === null) {
+                thinkingFrozenMs = performance.now() - thinkingStartedAt;
+                assistantMsgPlaceholder.durationSeconds = thinkingFrozenMs / 1000;
+            }
+
             if (err.name === 'AbortError') {
+                assistantMsgPlaceholder.status = 'completed';
                 assistantMsgPlaceholder.text += '\n\n_[Generación detenida.]_';
-                textContainer.innerHTML = parseMarkdown(assistantMsgPlaceholder.text);
+                loadCurrentConversation();
             } else {
                 console.error('API Request Error:', err);
                 showError('Error en la solicitud API', err.message);
@@ -1447,13 +1376,6 @@
     function setGeneratingState(generating) {
         isGenerating = generating;
         updateSendBtnState();
-        if (generating) {
-            elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
-            elements.sendBtn.title = 'Detener';
-        } else {
-            elements.sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
-            elements.sendBtn.title = 'Enviar mensaje';
-        }
     }
 
     function showError(title, message) {

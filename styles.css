@@ -28,7 +28,6 @@
     --shadow-lg: 0 8px 30px rgba(45, 42, 38, 0.12);
     
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-serif: 'Lora', Georgia, serif;
     --font-mono: 'JetBrains Mono', monospace;
     
     --sidebar-width: 270px;
@@ -68,6 +67,17 @@ body.dark-theme {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+button, input, textarea, select {
+    touch-action: manipulation;
+    user-select: none;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
 }
 
 html, body {
@@ -137,16 +147,16 @@ html, body {
 }
 
 .brand-name {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-size: 1.2rem;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-main);
     line-height: 1.2;
 }
 
 .brand-tag {
     font-size: 0.7rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--accent-color);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -442,9 +452,9 @@ html, body {
 }
 
 .topbar-brand-title {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-size: 1.15rem;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-main);
 }
 
@@ -600,9 +610,9 @@ html, body {
 }
 
 .welcome-title {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-size: 1.85rem;
-    font-weight: 500;
+    font-weight: 700;
     color: var(--text-main);
     margin-bottom: 6px;
 }
@@ -725,73 +735,6 @@ html, body {
     50% { transform: scale(1.2); opacity: 1; }
 }
 
-.continuation-badge {
-    display: inline-block;
-    font-size: 0.75rem;
-    color: var(--accent-color);
-    background-color: var(--accent-bg);
-    padding: 2px 8px;
-    border-radius: 10px;
-    margin-top: 8px;
-    margin-bottom: 4px;
-}
-
-/* Generated File Card */
-.generated-file-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    background-color: var(--bg-sidebar);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    margin-top: 12px;
-    margin-bottom: 8px;
-    gap: 12px;
-}
-
-.file-card-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.file-card-icon {
-    font-size: 1.5rem;
-}
-
-.file-card-details {
-    display: flex;
-    flex-direction: column;
-}
-
-.file-card-details strong {
-    font-size: 0.9rem;
-    color: var(--text-main);
-}
-
-.file-card-details span {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-}
-
-.file-download-btn {
-    padding: 6px 14px;
-    background-color: var(--accent-color);
-    color: #FFFFFF;
-    border: none;
-    border-radius: 8px;
-    font-family: var(--font-sans);
-    font-size: 0.82rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-}
-
-.file-download-btn:hover {
-    background-color: var(--accent-hover);
-}
-
 /* Attachments inside message */
 .message-attachments {
     display: flex;
@@ -830,7 +773,8 @@ html, body {
 }
 
 .message-bubble h1, .message-bubble h2, .message-bubble h3 {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
+    font-weight: 700;
     margin-top: 16px;
     margin-bottom: 8px;
     color: var(--text-main);
@@ -881,7 +825,7 @@ html, body {
     color: #AAA69D;
     cursor: pointer;
     font-size: 0.75rem;
-    padding: 2px 6px;
+    padding: 4px 8px;
     border-radius: 4px;
 }
 
@@ -908,11 +852,11 @@ html, body {
     color: var(--accent-color);
 }
 
-/* Assistant Message Action Toolbar */
+/* Assistant Message Action Toolbar (Clean Small Icons) */
 .message-actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 6px;
     margin-top: 10px;
     padding-top: 6px;
     border-top: 1px solid var(--border-subtle);
@@ -924,57 +868,19 @@ html, body {
     border: none;
     color: var(--text-light);
     cursor: pointer;
-    font-size: 0.78rem;
-    padding: 4px 8px;
-    border-radius: 6px;
-    display: flex;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border-radius: 8px;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    padding: 0;
     transition: all 0.15s ease;
 }
 
 .action-icon-btn:hover {
     color: var(--text-main);
-    background-color: var(--bg-hover);
-}
-
-/* Export Dropdown Menu */
-.download-wrapper {
-    position: relative;
-}
-
-.download-menu {
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    margin-bottom: 6px;
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: var(--shadow-lg);
-    display: flex;
-    flex-direction: column;
-    padding: 4px;
-    min-width: 160px;
-    z-index: 60;
-}
-
-.download-menu.hidden {
-    display: none;
-}
-
-.download-option {
-    padding: 6px 10px;
-    font-size: 0.8rem;
-    border: none;
-    background: none;
-    color: var(--text-main);
-    cursor: pointer;
-    text-align: left;
-    border-radius: 4px;
-}
-
-.download-option:hover {
     background-color: var(--bg-hover);
 }
 
@@ -1030,10 +936,10 @@ html, body {
     border: 1px solid var(--border-color);
     border-radius: 16px;
     box-shadow: var(--shadow-md);
-    padding: 10px 14px;
+    padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     transition: border-color 0.2s ease;
 }
 
@@ -1105,8 +1011,8 @@ html, body {
     font-size: 0.95rem;
     color: var(--text-main);
     background: transparent;
-    max-height: 160px;
-    min-height: 24px;
+    max-height: 180px;
+    min-height: 72px;
     line-height: 1.5;
 }
 
@@ -1114,23 +1020,31 @@ html, body {
     color: var(--text-light);
 }
 
-/* Compositor Toolbar Pills */
+/* Compositor Toolbar Pills Layout (NO HORIZONTAL SCROLLBAR) */
 .input-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
+    width: 100%;
 }
 
 .toolbar-left {
     display: flex;
     align-items: center;
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 2px;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.toolbar-right {
+    display: flex;
+    align-items: center;
 }
 
 .compositor-dropdown-wrapper {
     position: relative;
+    min-width: 0;
 }
 
 .compositor-pill-btn {
@@ -1148,11 +1062,40 @@ html, body {
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
+    max-width: 100%;
 }
 
 .compositor-pill-btn:hover {
     background-color: var(--bg-hover);
     border-color: var(--text-muted);
+}
+
+.compositor-pill-btn.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+    background-color: var(--bg-main);
+}
+
+/* Attach button: only '+' */
+.attach-btn-plus {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.model-pill-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .compositor-menu {
@@ -1167,8 +1110,9 @@ html, body {
     display: flex;
     flex-direction: column;
     padding: 6px;
-    min-width: 200px;
-    z-index: 70;
+    min-width: 180px;
+    z-index: 1000;
+    pointer-events: auto;
 }
 
 .compositor-menu.hidden {
@@ -1207,8 +1151,8 @@ html, body {
 }
 
 .send-btn {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     border-radius: 10px;
     background-color: var(--accent-color);
     color: #FFFFFF;
@@ -1241,7 +1185,7 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 200;
+    z-index: 2000;
     backdrop-filter: blur(4px);
 }
 
@@ -1268,9 +1212,9 @@ html, body {
 }
 
 .modal-header h3 {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-size: 1.1rem;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .modal-close-btn {

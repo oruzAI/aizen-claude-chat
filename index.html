@@ -7,16 +7,15 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23D97757'><path d='M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z'/></svg>">
     
-    <!-- External Libraries for File Processing & Exporting -->
+    <!-- External Libraries for PDF Parsing -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
     <div class="app-layout">
@@ -34,12 +33,12 @@
                         <span class="brand-tag">Workspace</span>
                     </div>
                 </div>
-                <button class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Cerrar lateral">
+                <button type="button" class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Cerrar lateral" aria-label="Cerrar lateral">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
 
-            <button class="new-chat-btn" id="newChatBtn">
+            <button type="button" class="new-chat-btn" id="newChatBtn">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                 <span>Nueva conversación</span>
             </button>
@@ -54,15 +53,15 @@
                 <div class="sidebar-control-group">
                     <span class="control-label">Tema</span>
                     <div class="pill-segmented" id="themeSegment">
-                        <button class="segment-btn" data-theme="light">☀ Claro</button>
-                        <button class="segment-btn" data-theme="dark">☾ Oscuro</button>
-                        <button class="segment-btn" data-theme="system">◐ Sistema</button>
+                        <button type="button" class="segment-btn" data-theme="light">☀ Claro</button>
+                        <button type="button" class="segment-btn" data-theme="dark">☾ Oscuro</button>
+                        <button type="button" class="segment-btn" data-theme="system">◐ Sistema</button>
                     </div>
                 </div>
             </div>
 
             <div class="sidebar-footer">
-                <button class="sidebar-btn" id="openApiKeyBtn">
+                <button type="button" class="sidebar-btn" id="openApiKeyBtn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
                     <span id="apiKeyStatusText">API Key de Claude</span>
                 </button>
@@ -88,7 +87,7 @@
             <!-- Header Topbar (Clean Header) -->
             <header class="topbar">
                 <div class="topbar-left">
-                    <button class="icon-btn mobile-menu-btn" id="openSidebarBtn" title="Menú">
+                    <button type="button" class="icon-btn mobile-menu-btn" id="openSidebarBtn" title="Menú" aria-label="Menú">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
                     </button>
                     <span class="topbar-brand-title">Aizen</span>
@@ -99,7 +98,7 @@
                     
                     <!-- Desktop Actions -->
                     <div class="desktop-actions">
-                        <button class="topbar-action-btn" id="clearChatBtn" title="Limpiar chat">
+                        <button type="button" class="topbar-action-btn" id="clearChatBtn" title="Limpiar chat">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             <span>Limpiar</span>
                         </button>
@@ -107,11 +106,11 @@
 
                     <!-- Mobile Overflow Menu Trigger -->
                     <div class="mobile-overflow-wrapper">
-                        <button class="icon-btn" id="mobileMenuMoreBtn" title="Más opciones">
+                        <button type="button" class="icon-btn" id="mobileMenuMoreBtn" title="Más opciones" aria-label="Más opciones">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                         </button>
                         <div class="mobile-overflow-menu hidden" id="mobileOverflowMenu">
-                            <button class="menu-item-btn" id="mobileClearBtn">
+                            <button type="button" class="menu-item-btn" id="mobileClearBtn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                 <span>Limpiar Conversación</span>
                             </button>
@@ -133,21 +132,21 @@
                     <p class="welcome-subtitle">¿En qué puedo ayudarte?</p>
 
                     <div class="starter-cards">
-                        <button class="starter-card" data-prompt="Explica el concepto de recursividad y cómo funciona en JavaScript con ejemplos prácticos.">
+                        <button type="button" class="starter-card" data-prompt="Explica el concepto de recursividad y cómo funciona en JavaScript con ejemplos prácticos.">
                             <div class="card-icon">⚡</div>
                             <div class="card-text">
                                 <strong>Explicar conceptos</strong>
                                 <span>Recursividad en JavaScript</span>
                             </div>
                         </button>
-                        <button class="starter-card" data-prompt="Escribe un script en Python para leer un archivo CSV, limpiar los datos y guardarlos en JSON.">
+                        <button type="button" class="starter-card" data-prompt="Escribe un script en Python para leer un archivo CSV, limpiar los datos y guardarlos en JSON.">
                             <div class="card-icon">💻</div>
                             <div class="card-text">
                                 <strong>Escribir código</strong>
                                 <span>Procesador de CSV en Python</span>
                             </div>
                         </button>
-                        <button class="starter-card" data-prompt="Redacta una propuesta de proyecto estructurada en Markdown con objetivos, metodología y entregables.">
+                        <button type="button" class="starter-card" data-prompt="Redacta una propuesta de proyecto estructurada en Markdown con objetivos, metodología y entregables.">
                             <div class="card-icon">📝</div>
                             <div class="card-text">
                                 <strong>Redacción y síntesis</strong>
@@ -161,7 +160,7 @@
                 <div class="messages-feed" id="messagesFeed"></div>
 
                 <!-- Floating Scroll To Bottom Button -->
-                <button type="button" id="scrollToBottomBtn" class="scroll-to-bottom-btn hidden" title="Ir al final">
+                <button type="button" id="scrollToBottomBtn" class="scroll-to-bottom-btn hidden" title="Ir al final" aria-label="Ir al final">
                     <span>Ir al final ↓</span>
                 </button>
             </div>
@@ -173,7 +172,7 @@
                     <strong id="errorTitle">Error de API</strong>
                     <p id="errorMessage">Ha ocurrido un problema al procesar la solicitud.</p>
                 </div>
-                <button class="error-close" id="closeErrorBtn">&times;</button>
+                <button type="button" class="error-close" id="closeErrorBtn" aria-label="Cerrar error">&times;</button>
             </div>
 
             <!-- Floating Input Area / Compositor -->
@@ -182,52 +181,49 @@
                     <div class="attachments-preview hidden" id="attachmentsPreview"></div>
 
                     <div class="input-row">
-                        <textarea id="userInput" placeholder="Escribe un mensaje a Aizen..." rows="1"></textarea>
+                        <textarea id="userInput" placeholder="Escribe un mensaje a Claude..." rows="2"></textarea>
                     </div>
 
                     <div class="input-toolbar">
                         <div class="toolbar-left">
-                            <!-- Attach File Button -->
+                            <!-- Attach File Button: ONLY '+' icon -->
                             <input type="file" id="fileInput" multiple accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.md,.json,.js,.py,.html,.css,.csv,.xml,.docx,.xlsx,.xls" hidden>
-                            <button type="button" class="compositor-pill-btn" id="attachFileBtn" title="Adjuntar imagen, PDF, DOCX, Excel o texto">
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                                <span>Adjuntar</span>
-                            </button>
+                            <button type="button" class="compositor-pill-btn attach-btn-plus" id="attachFileBtn" title="Adjuntar archivos" aria-label="Adjuntar archivos">+</button>
 
                             <!-- Model Selector Pill in Compositor -->
                             <div class="compositor-dropdown-wrapper">
-                                <button type="button" class="compositor-pill-btn" id="modelPillBtn">
-                                    <span id="modelPillLabel">Opus 5 Thinking</span>
+                                <button type="button" class="compositor-pill-btn" id="modelPillBtn" aria-label="Seleccionar modelo">
+                                    <span id="modelPillLabel" class="model-pill-label">Opus 5 Thinking</span>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
                                 </button>
                                 <div class="compositor-menu hidden" id="modelMenu">
-                                    <button class="compositor-menu-item active" data-model="nghi/claude-opus-5-thinking">Opus 5 Thinking</button>
-                                    <button class="compositor-menu-item" data-model="nghi/claude-opus-5">Opus 5</button>
-                                    <button class="compositor-menu-item" data-model="nghi/claude-opus-4.8-thinking">Opus 4.8 Thinking</button>
-                                    <button class="compositor-menu-item" data-model="nghi/claude-opus-4.8">Opus 4.8</button>
-                                    <button class="compositor-menu-item" data-model="nghi/claude-sonnet-5">Sonnet 5</button>
-                                    <button class="compositor-menu-item" data-model="nghi/claude-haiku-4.5">Haiku 4.5</button>
+                                    <button type="button" class="compositor-menu-item active" data-model="nghi/claude-opus-5-thinking">Opus 5 Thinking</button>
+                                    <button type="button" class="compositor-menu-item" data-model="nghi/claude-opus-5">Opus 5</button>
+                                    <button type="button" class="compositor-menu-item" data-model="nghi/claude-opus-4.8-thinking">Opus 4.8 Thinking</button>
+                                    <button type="button" class="compositor-menu-item" data-model="nghi/claude-opus-4.8">Opus 4.8</button>
+                                    <button type="button" class="compositor-menu-item" data-model="nghi/claude-sonnet-5">Sonnet 5</button>
+                                    <button type="button" class="compositor-menu-item" data-model="nghi/claude-haiku-4.5">Haiku 4.5</button>
                                 </div>
                             </div>
 
                             <!-- Effort Selector Pill in Compositor -->
                             <div class="compositor-dropdown-wrapper" id="effortPillWrapper">
-                                <button type="button" class="compositor-pill-btn" id="effortPillBtn">
+                                <button type="button" class="compositor-pill-btn" id="effortPillBtn" aria-label="Seleccionar nivel de esfuerzo">
                                     <span id="effortPillLabel">Alto</span>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
                                 </button>
                                 <div class="compositor-menu hidden" id="effortMenu">
-                                    <button class="compositor-menu-item" data-effort="low">Bajo <span class="item-desc">más rápido y menor consumo</span></button>
-                                    <button class="compositor-menu-item" data-effort="medium">Medio <span class="item-desc">equilibrio</span></button>
-                                    <button class="compositor-menu-item active" data-effort="high">Alto <span class="item-desc">mejor razonamiento general</span></button>
-                                    <button class="compositor-menu-item" data-effort="very_high">Muy alto <span class="item-desc">tareas complejas</span></button>
-                                    <button class="compositor-menu-item" data-effort="maximum">Máximo <span class="item-desc">máxima capacidad</span></button>
+                                    <button type="button" class="compositor-menu-item" data-effort="low">Bajo <span class="item-desc">más rápido y menor consumo</span></button>
+                                    <button type="button" class="compositor-menu-item" data-effort="medium">Medio <span class="item-desc">equilibrio</span></button>
+                                    <button type="button" class="compositor-menu-item active" data-effort="high">Alto <span class="item-desc">mejor razonamiento general</span></button>
+                                    <button type="button" class="compositor-menu-item" data-effort="very_high">Muy alto <span class="item-desc">tareas complejas</span></button>
+                                    <button type="button" class="compositor-menu-item" data-effort="maximum">Máximo <span class="item-desc">máxima capacidad</span></button>
                                 </div>
                             </div>
                         </div>
 
                         <div class="toolbar-right">
-                            <button type="button" class="send-btn" id="sendBtn" title="Enviar mensaje">
+                            <button type="button" class="send-btn" id="sendBtn" title="Enviar mensaje" aria-label="Enviar mensaje">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
                             </button>
                         </div>
@@ -242,7 +238,7 @@
         <div class="modal-card">
             <div class="modal-header">
                 <h3>API Key de Claude</h3>
-                <button class="modal-close-btn" id="closeApiKeyModal">&times;</button>
+                <button type="button" class="modal-close-btn" id="closeApiKeyModal" aria-label="Cerrar modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -251,9 +247,9 @@
                 </div>
 
                 <div class="api-key-actions">
-                    <button class="btn btn-secondary" id="testApiKeyBtn">Probar conexión</button>
-                    <button class="btn btn-primary" id="saveApiKeyBtn">Guardar clave</button>
-                    <button class="btn btn-danger" id="clearApiKeyBtn">Eliminar clave</button>
+                    <button type="button" class="btn btn-secondary" id="testApiKeyBtn">Probar conexión</button>
+                    <button type="button" class="btn btn-primary" id="saveApiKeyBtn">Guardar clave</button>
+                    <button type="button" class="btn btn-danger" id="clearApiKeyBtn">Eliminar clave</button>
                 </div>
 
                 <div id="apiKeyNotice" class="modal-notice hidden"></div>

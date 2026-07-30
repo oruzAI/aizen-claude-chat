@@ -1,6 +1,6 @@
 /**
  * Aizen — Claude Workspace Logic
- * Pure Client-Side Implementation with Multi-Format File Processing & Real-Time Precision Timer
+ * Direct client-side integration with https://api.nghimmo.com/v1/messages
  */
 
 (function () {
@@ -15,11 +15,35 @@
     const STORAGE_KEY_EFFORT = 'aizen_effort';
     const STORAGE_KEY_THEME = 'aizen_theme';
 
+    // One-time effort migration to 'high'
+    if (!localStorage.getItem('aizen_effort_migrated_v2')) {
+        localStorage.setItem('aizen_effort', 'high');
+        localStorage.setItem('aizen_effort_migrated_v2', 'true');
+    }
+
+    // Models Map
+    const MODELS_MAP = {
+        'nghi/claude-opus-5-thinking': 'Opus 5 Thinking',
+        'nghi/claude-opus-5': 'Opus 5',
+        'nghi/claude-opus-4.8-thinking': 'Opus 4.8 Thinking',
+        'nghi/claude-opus-4.8': 'Opus 4.8',
+        'nghi/claude-sonnet-5': 'Sonnet 5',
+        'nghi/claude-haiku-4.5': 'Haiku 4.5'
+    };
+
+    const EFFORT_MAP = {
+        'low': 'Bajo',
+        'medium': 'Medio',
+        'high': 'Alto',
+        'very_high': 'Muy alto',
+        'maximum': 'Máximo'
+    };
+
     // State Variables
     let apiKey = (localStorage.getItem(STORAGE_KEY_API_KEY) || '').trim();
     let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || 'nghi/claude-opus-5-thinking';
     let selectedEffort = localStorage.getItem(STORAGE_KEY_EFFORT) || 'high';
-    let currentTheme = localStorage.getItem(STORAGE_KEY_THEME) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    let currentTheme = localStorage.getItem(STORAGE_KEY_THEME) || 'system';
     
     let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVERSATIONS) || '[]');
     let currentConvId = localStorage.getItem(STORAGE_KEY_CURRENT_ID) || null;
@@ -27,6 +51,9 @@
     let pendingAttachments = []; // Array of { id, file, type, name, sizeFormatted, status: 'processing'|'ready'|'error', content, base64 }
     let isGenerating = false;
     let abortController = null;
+    let activeReader = null;
+    let effortDisabledForSession = false;
+    let dragCounter = 0;
 
     // Configure PDF.js worker
     if (window.pdfjsLib) {
@@ -44,10 +71,7 @@
         openApiKeyBtn: document.getElementById('openApiKeyBtn'),
         apiKeyStatusText: document.getElementById('apiKeyStatusText'),
         
-        modelSelect: document.getElementById('modelSelect'),
-        effortWrapper: document.getElementById('effortWrapper'),
-        effortSelect: document.getElementById('effortSelect'),
-        themeToggleBtn: document.getElementById('themeToggleBtn'),
+        themeSegment: document.getElementById('themeSegment'),
         activeChatTitle: document.getElementById('activeChatTitle'),
         
         clearChatBtn: document.getElementById('clearChatBtn'),
@@ -56,6 +80,8 @@
         mobileClearBtn: document.getElementById('mobileClearBtn'),
         
         chatViewport: document.getElementById('chatViewport'),
+        scrollToBottomBtn: document.getElementById('scrollToBottomBtn'),
+        dragDropOverlay: document.getElementById('dragDropOverlay'),
         welcomeContainer: document.getElementById('welcomeContainer'),
         messagesFeed: document.getElementById('messagesFeed'),
         errorBanner: document.getElementById('errorBanner'),
@@ -67,8 +93,19 @@
         userInput: document.getElementById('userInput'),
         fileInput: document.getElementById('fileInput'),
         attachFileBtn: document.getElementById('attachFileBtn'),
+        
+        // Compositor Pills
+        modelPillBtn: document.getElementById('modelPillBtn'),
+        modelPillLabel: document.getElementById('modelPillLabel'),
+        modelMenu: document.getElementById('modelMenu'),
+        effortPillWrapper: document.getElementById('effortPillWrapper'),
+        effortPillBtn: document.getElementById('effortPillBtn'),
+        effortPillLabel: document.getElementById('effortPillLabel'),
+        effortMenu: document.getElementById('effortMenu'),
+        
         sendBtn: document.getElementById('sendBtn'),
         
+        // API Key Modal
         apiKeyModal: document.getElementById('apiKeyModal'),
         closeApiKeyModal: document.getElementById('closeApiKeyModal'),
         apiKeyInput: document.getElementById('apiKeyInput'),
@@ -80,10 +117,11 @@
 
     // Initialize App
     function init() {
-        applyTheme(currentTheme);
+        initTheme();
         setupEventListeners();
+        setupDragAndDrop();
         updateApiKeyUI();
-        initSelectors();
+        initPills();
         
         if (!currentConvId && conversations.length > 0) {
             currentConvId = conversations[0].id;
@@ -93,31 +131,73 @@
         loadCurrentConversation();
     }
 
-    // Theme Logic
+    // Theme Manager
+    function initTheme() {
+        applyTheme(currentTheme);
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (currentTheme === 'system') applyTheme('system');
+        });
+    }
+
     function applyTheme(theme) {
         currentTheme = theme;
         localStorage.setItem(STORAGE_KEY_THEME, theme);
-        if (theme === 'dark') {
+
+        let effectiveDark = false;
+        if (theme === 'dark') effectiveDark = true;
+        else if (theme === 'light') effectiveDark = false;
+        else effectiveDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        if (effectiveDark) {
             document.body.classList.add('dark-theme');
-            elements.themeToggleBtn.querySelector('.sun-icon').classList.add('hidden');
-            elements.themeToggleBtn.querySelector('.moon-icon').classList.remove('hidden');
         } else {
             document.body.classList.remove('dark-theme');
-            elements.themeToggleBtn.querySelector('.sun-icon').classList.remove('hidden');
-            elements.themeToggleBtn.querySelector('.moon-icon').classList.add('hidden');
+        }
+
+        if (elements.themeSegment) {
+            elements.themeSegment.querySelectorAll('.segment-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-theme') === theme);
+            });
         }
     }
 
-    function toggleTheme() {
-        applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    // Drag and Drop Setup
+    function setupDragAndDrop() {
+        const target = elements.chatViewport;
+
+        window.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            elements.dragDropOverlay.classList.remove('hidden');
+        });
+
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+
+        window.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                elements.dragDropOverlay.classList.add('hidden');
+            }
+        });
+
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            elements.dragDropOverlay.classList.add('hidden');
+
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFileSelection({ target: { files: e.dataTransfer.files } });
+            }
+        });
     }
 
-    // Event Listeners Setup
+    // Event Listeners
     function setupEventListeners() {
-        // Theme Toggle
-        elements.themeToggleBtn.addEventListener('click', toggleTheme);
-
-        // Sidebar
+        // Sidebar drawer
         elements.openSidebarBtn.addEventListener('click', () => {
             elements.sidebar.classList.add('open');
             elements.sidebarBackdrop.classList.add('active');
@@ -152,18 +232,48 @@
             if (!elements.mobileOverflowMenu.contains(e.target) && e.target !== elements.mobileMenuMoreBtn) {
                 elements.mobileOverflowMenu.classList.add('hidden');
             }
+            if (!elements.modelPillBtn.contains(e.target) && !elements.modelMenu.contains(e.target)) {
+                elements.modelMenu.classList.add('hidden');
+            }
+            if (!elements.effortPillBtn.contains(e.target) && !elements.effortMenu.contains(e.target)) {
+                elements.effortMenu.classList.add('hidden');
+            }
         });
 
-        // Selectors
-        elements.modelSelect.addEventListener('change', (e) => {
-            selectedModel = e.target.value;
-            localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
-            checkEffortVisibility();
+        // Sidebar Theme Segment
+        elements.themeSegment.querySelectorAll('.segment-btn').forEach(btn => {
+            btn.addEventListener('click', () => applyTheme(btn.getAttribute('data-theme')));
         });
 
-        elements.effortSelect.addEventListener('change', (e) => {
-            selectedEffort = e.target.value;
-            localStorage.setItem(STORAGE_KEY_EFFORT, selectedEffort);
+        // Compositor Model & Effort Pills
+        elements.modelPillBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.effortMenu.classList.add('hidden');
+            elements.modelMenu.classList.toggle('hidden');
+        });
+
+        elements.modelMenu.querySelectorAll('.compositor-menu-item').forEach(item => {
+            item.addEventListener('click', () => {
+                selectedModel = item.getAttribute('data-model');
+                localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                elements.modelMenu.classList.add('hidden');
+                updatePills();
+            });
+        });
+
+        elements.effortPillBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.modelMenu.classList.add('hidden');
+            elements.effortMenu.classList.toggle('hidden');
+        });
+
+        elements.effortMenu.querySelectorAll('.compositor-menu-item').forEach(item => {
+            item.addEventListener('click', () => {
+                selectedEffort = item.getAttribute('data-effort');
+                localStorage.setItem(STORAGE_KEY_EFFORT, selectedEffort);
+                elements.effortMenu.classList.add('hidden');
+                updatePills();
+            });
         });
 
         // API Key Modal
@@ -187,7 +297,7 @@
             });
         });
 
-        // Textarea & Send
+        // Textarea & Send / Stop
         elements.userInput.addEventListener('input', autoResizeTextarea);
         elements.userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -196,12 +306,21 @@
             }
         });
 
-        elements.sendBtn.addEventListener('click', () => {
+        elements.sendBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             if (isGenerating) {
                 stopGeneration();
             } else {
                 sendMessage();
             }
+        });
+
+        // Scroll to bottom floating button
+        elements.chatViewport.addEventListener('scroll', handleViewportScroll);
+        elements.scrollToBottomBtn.addEventListener('click', () => {
+            elements.chatViewport.scrollTo({ top: elements.chatViewport.scrollHeight, behavior: 'smooth' });
+            elements.scrollToBottomBtn.classList.add('hidden');
         });
 
         // Attachments
@@ -211,7 +330,7 @@
         // Error Banner
         elements.closeErrorBtn.addEventListener('click', hideError);
 
-        // Event Delegation for Messages Feed
+        // Feed Actions
         elements.messagesFeed.addEventListener('click', handleFeedActions);
     }
 
@@ -220,17 +339,35 @@
         elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 160) + 'px';
     }
 
-    function initSelectors() {
-        elements.modelSelect.value = selectedModel;
-        elements.effortSelect.value = selectedEffort;
-        checkEffortVisibility();
+    function initPills() {
+        updatePills();
     }
 
-    function checkEffortVisibility() {
-        if (selectedModel === 'nghi/claude-haiku-4.5') {
-            elements.effortWrapper.style.display = 'none';
+    function updatePills() {
+        elements.modelPillLabel.textContent = MODELS_MAP[selectedModel] || 'Opus 5 Thinking';
+        
+        elements.modelMenu.querySelectorAll('.compositor-menu-item').forEach(item => {
+            item.classList.toggle('active', item.getAttribute('data-model') === selectedModel);
+        });
+
+        if (selectedModel === 'nghi/claude-haiku-4.5' || effortDisabledForSession) {
+            elements.effortPillWrapper.style.display = 'none';
         } else {
-            elements.effortWrapper.style.display = 'flex';
+            elements.effortPillWrapper.style.display = 'block';
+            elements.effortPillLabel.textContent = EFFORT_MAP[selectedEffort] || 'Alto';
+            elements.effortMenu.querySelectorAll('.compositor-menu-item').forEach(item => {
+                item.classList.toggle('active', item.getAttribute('data-effort') === selectedEffort);
+            });
+        }
+    }
+
+    function handleViewportScroll() {
+        const vp = elements.chatViewport;
+        const distanceFromBottom = vp.scrollHeight - vp.scrollTop - vp.clientHeight;
+        if (distanceFromBottom > 120 && isGenerating) {
+            elements.scrollToBottomBtn.classList.remove('hidden');
+        } else {
+            elements.scrollToBottomBtn.classList.add('hidden');
         }
     }
 
@@ -259,7 +396,7 @@
         localStorage.setItem(STORAGE_KEY_API_KEY, rawKey);
         updateApiKeyUI();
         showModalNotice('Clave guardada.', 'success');
-        setTimeout(closeApiKeyModal, 700);
+        setTimeout(closeApiKeyModal, 600);
     }
 
     function clearApiKey() {
@@ -311,23 +448,25 @@
         elements.apiKeyNotice.className = `modal-notice ${type}`;
     }
 
-    // File Processing (Images, PDF, DOCX, XLSX, Text)
+    // PDF Direct Base64 & Multi-Format Processing
     async function handleFileSelection(e) {
         const files = Array.from(e.target.files);
         if (!files.length) return;
 
-        // Disables Send button while processing
         updateSendBtnState();
 
         for (const file of files) {
             const fileId = 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
             const sizeFormatted = formatFileSize(file.size);
+            const fileType = getFileType(file.name, file.type);
+            
             const attItem = {
                 id: fileId,
                 file,
                 name: file.name,
                 sizeFormatted,
-                type: getFileType(file.name, file.type),
+                type: fileType,
+                method: 'Directo',
                 status: 'processing',
                 content: '',
                 base64: ''
@@ -337,10 +476,6 @@
             renderAttachmentsPreview();
 
             try {
-                if (file.size > 25 * 1024 * 1024) {
-                    throw new Error('El archivo supera el límite recomendado de 25MB.');
-                }
-
                 await processFileContent(attItem);
                 attItem.status = 'ready';
             } catch (err) {
@@ -373,7 +508,6 @@
 
     async function processFileContent(att) {
         const file = att.file;
-        const ext = att.name.split('.').pop().toLowerCase();
 
         if (att.type === 'image') {
             return new Promise((resolve, reject) => {
@@ -382,6 +516,7 @@
                     att.dataUrl = e.target.result;
                     att.base64 = e.target.result.split(',')[1];
                     att.mimeType = file.type || 'image/png';
+                    att.method = 'Directo';
                     resolve();
                 };
                 reader.onerror = reject;
@@ -390,33 +525,36 @@
         }
 
         if (att.type === 'pdf') {
+            // Mode A: Direct Base64 Mode
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     att.dataUrl = e.target.result;
                     att.base64 = e.target.result.split(',')[1];
+                    att.mimeType = 'application/pdf';
+                    att.method = 'Directo';
 
-                    // Extract text with PDF.js if available
-                    if (window.pdfjsLib) {
+                    // If large, fallback text extraction
+                    if (window.pdfjsLib && file.size > 20 * 1024 * 1024) {
                         try {
+                            att.method = 'Dividido';
                             const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(e.target.result) });
                             const pdf = await loadingTask.promise;
                             let fullText = '';
                             for (let i = 1; i <= pdf.numPages; i++) {
                                 const page = await pdf.getPage(i);
                                 const content = await page.getTextContent();
-                                const strings = content.items.map(item => item.str);
-                                fullText += `--- Página ${i} ---\n` + strings.join(' ') + '\n\n';
+                                fullText += `--- Página ${i} ---\n` + content.items.map(it => it.str).join(' ') + '\n\n';
                             }
                             att.content = fullText.trim();
-                        } catch (pdfErr) {
-                            console.warn('PDF.js text extraction fallback:', pdfErr);
+                        } catch (err) {
+                            console.warn('Fallback PDF extraction error:', err);
                         }
                     }
                     resolve();
                 };
                 reader.onerror = reject;
-                reader.readAsArrayBuffer(file);
+                reader.readAsDataURL(file);
             });
         }
 
@@ -428,13 +566,10 @@
                         try {
                             const result = await window.mammoth.extractRawText({ arrayBuffer: e.target.result });
                             att.content = result.value;
+                            att.method = 'Directo';
                             resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    } else {
-                        reject(new Error('Librería Mammoth.js no disponible'));
-                    }
+                        } catch (err) { reject(err); }
+                    } else { reject(new Error('Mammoth.js no disponible')); }
                 };
                 reader.onerror = reject;
                 reader.readAsArrayBuffer(file);
@@ -454,24 +589,22 @@
                                 excelText += `=== Hoja: ${sheetName} ===\n${csv}\n\n`;
                             });
                             att.content = excelText.trim();
+                            att.method = 'Directo';
                             resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    } else {
-                        reject(new Error('Librería SheetJS no disponible'));
-                    }
+                        } catch (err) { reject(err); }
+                    } else { reject(new Error('SheetJS no disponible')); }
                 };
                 reader.onerror = reject;
                 reader.readAsArrayBuffer(file);
             });
         }
 
-        // Plain Text / CSV / Code
+        // Plain Text
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 att.content = e.target.result;
+                att.method = 'Directo';
                 resolve();
             };
             reader.onerror = reject;
@@ -495,6 +628,7 @@
             return `
                 <div class="preview-chip">
                     <span>${getAttachmentIcon(att.type)} ${escapeHtml(att.name)} (${att.sizeFormatted})</span>
+                    <span class="chip-method-badge">${att.method}</span>
                     ${statusHTML}
                     <button type="button" class="chip-remove" data-idx="${idx}">&times;</button>
                 </div>
@@ -513,7 +647,7 @@
 
     function updateSendBtnState() {
         const isProcessing = pendingAttachments.some(att => att.status === 'processing');
-        elements.sendBtn.disabled = isProcessing || isGenerating;
+        elements.sendBtn.disabled = isProcessing;
     }
 
     function getAttachmentIcon(type) {
@@ -620,26 +754,14 @@
         scrollToBottom();
     }
 
-    // Precision Thinking Timer Renderer
-    function renderThinkingBoxHTML(durationSeconds, isThinking) {
-        let label = '';
-
-        if (isThinking) {
-            label = `Pensando… ${formatDuration(durationSeconds, true)}`;
-        } else {
-            label = `Pensó durante ${formatDuration(durationSeconds, false)}`;
-        }
+    // Thinking Line Renderer
+    function renderThinkingLineHTML(durationSeconds, isThinking) {
+        let label = isThinking ? `Pensando… ${formatDuration(durationSeconds, true)}` : `Pensó durante ${formatDuration(durationSeconds, false)}`;
 
         return `
-            <div class="thinking-accordion">
-                <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                    <span class="thinking-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        <span class="timer-label">${escapeHtml(label)}</span>
-                    </span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-                </div>
-                <div class="thinking-body">Proceso de razonamiento del modelo completado.</div>
+            <div class="thinking-line">
+                ${isThinking ? '<span class="thinking-pulse-dot"></span>' : '●'}
+                <span>${escapeHtml(label)}</span>
             </div>
         `;
     }
@@ -652,19 +774,17 @@
         const remainingSec = sec % 60;
 
         if (hrs > 0) {
-            return `${hrs} hora${hrs > 1 ? 's' : ''} ${mins} min ${remainingSec} s`;
+            return `${hrs} h ${mins} min ${remainingSec} s`;
         }
         if (mins > 0) {
-            return `${mins} minuto${mins > 1 ? 's' : ''} ${remainingSec}${includeHundredths ? '.' + hundredths : ''} segundos`;
+            return `${mins} min ${remainingSec}${includeHundredths ? '.' + hundredths : ''} s`;
         }
-        return `${remainingSec}${includeHundredths ? '.' + hundredths : ''} segundos`;
+        return `${remainingSec}${includeHundredths ? '.' + hundredths : ''} s`;
     }
 
-    // Single Clean Action Bar Message Renderer
+    // Message Renderer (Original Claude Look)
     function renderMessageHTML(msg) {
         const isUser = msg.role === 'user';
-        const roleName = isUser ? 'Tú' : 'Aizen';
-        const avatarLetter = isUser ? 'U' : 'A';
 
         let attachmentsHTML = '';
         if (msg.attachments && msg.attachments.length) {
@@ -678,16 +798,33 @@
 
         let thinkingHTML = '';
         if (!isUser && msg.durationSeconds !== undefined) {
-            thinkingHTML = renderThinkingBoxHTML(msg.durationSeconds, false);
+            thinkingHTML = renderThinkingLineHTML(msg.durationSeconds, false);
+        }
+
+        let generatedFileCardHTML = '';
+        if (!isUser && msg.generatedFile) {
+            const gf = msg.generatedFile;
+            generatedFileCardHTML = `
+                <div class="generated-file-card">
+                    <div class="file-card-info">
+                        <div class="file-card-icon">📄</div>
+                        <div class="file-card-details">
+                            <strong>${escapeHtml(gf.name)}</strong>
+                            <span>${escapeHtml(gf.typeLabel)} · ${escapeHtml(gf.size)}</span>
+                        </div>
+                    </div>
+                    <button class="file-download-btn" data-gen-download="${encodeURIComponent(gf.content)}" data-gen-name="${escapeHtml(gf.name)}" data-gen-fmt="${gf.format}">Descargar</button>
+                </div>
+            `;
         }
 
         let bodyHTML = isUser ? `<p>${escapeHtml(msg.text || '').replace(/\n/g, '<br>')}</p>` : parseMarkdown(msg.text || '');
 
-        const actionsHTML = !isUser ? `
+        const actionsHTML = (!isUser && !isGenerating) ? `
             <div class="message-actions">
                 <button class="action-icon-btn copy-msg-btn" data-text="${encodeURIComponent(msg.text || '')}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    <span>Copiar</span>
+                    <span>Copiar todo</span>
                 </button>
                 
                 <div class="download-wrapper">
@@ -715,14 +852,11 @@
 
         return `
             <div class="message-item ${msg.role}">
-                <div class="message-avatar">
-                    <span class="avatar-badge">${avatarLetter}</span>
-                    <span>${roleName}</span>
-                </div>
                 <div class="message-bubble">
                     ${attachmentsHTML}
                     ${thinkingHTML}
                     <div class="message-text">${bodyHTML}</div>
+                    ${generatedFileCardHTML}
                     ${actionsHTML}
                 </div>
             </div>
@@ -813,6 +947,15 @@
             return;
         }
 
+        const genDownloadBtn = e.target.closest('.file-download-btn');
+        if (genDownloadBtn) {
+            const content = decodeURIComponent(genDownloadBtn.getAttribute('data-gen-download'));
+            const name = genDownloadBtn.getAttribute('data-gen-name');
+            const fmt = genDownloadBtn.getAttribute('data-gen-fmt');
+            exportMessageAsFormat(content, fmt, name);
+            return;
+        }
+
         const copyCodeBtn = e.target.closest('.copy-code-btn');
         if (copyCodeBtn) {
             const rawCode = decodeURIComponent(copyCodeBtn.getAttribute('data-code'));
@@ -838,30 +981,32 @@
     }
 
     // Export Message into PDF, DOCX, XLSX, CSV, MD, TXT, HTML
-    function exportMessageAsFormat(rawText, format) {
-        const filename = `aizen-export-${Date.now()}`;
+    function exportMessageAsFormat(rawText, format, customFilename) {
+        const filename = customFilename || `aizen-export-${Date.now()}.${format}`;
 
         if (format === 'md') {
-            downloadBlobFile(rawText, `${filename}.md`, 'text/markdown');
+            downloadBlobFile(rawText, filename.endsWith('.md') ? filename : `${filename}.md`, 'text/markdown');
             return;
         }
         if (format === 'txt') {
-            downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
+            downloadBlobFile(rawText, filename.endsWith('.txt') ? filename : `${filename}.txt`, 'text/plain');
             return;
         }
         if (format === 'html') {
             const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Aizen Export</title><style>body{font-family:sans-serif;padding:30px;line-height:1.6;}</style></head><body>${parseMarkdown(rawText)}</body></html>`;
-            downloadBlobFile(htmlContent, `${filename}.html`, 'text/html');
+            downloadBlobFile(htmlContent, filename.endsWith('.html') ? filename : `${filename}.html`, 'text/html');
             return;
         }
 
         if (format === 'pdf') {
             if (window.html2pdf) {
                 const element = document.createElement('div');
-                element.style.padding = '20px';
+                element.style.padding = '24px';
                 element.style.fontFamily = 'sans-serif';
+                element.style.backgroundColor = '#FFFFFF';
+                element.style.color = '#000000';
                 element.innerHTML = parseMarkdown(rawText);
-                window.html2pdf().from(element).save(`${filename}.pdf`);
+                window.html2pdf().from(element).save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
             } else {
                 downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
             }
@@ -870,7 +1015,6 @@
 
         if (format === 'xlsx' || format === 'csv') {
             if (window.XLSX) {
-                // Try extracting tables
                 const rows = [];
                 const lines = rawText.split('\n');
                 lines.forEach(l => {
@@ -891,9 +1035,9 @@
                 window.XLSX.utils.book_append_sheet(wb, ws, "Aizen Data");
 
                 if (format === 'csv') {
-                    window.XLSX.writeFile(wb, `${filename}.csv`, { bookType: 'csv' });
+                    window.XLSX.writeFile(wb, filename.endsWith('.csv') ? filename : `${filename}.csv`, { bookType: 'csv' });
                 } else {
-                    window.XLSX.writeFile(wb, `${filename}.xlsx`);
+                    window.XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`);
                 }
             } else {
                 downloadBlobFile(rawText, `${filename}.txt`, 'text/plain');
@@ -902,9 +1046,8 @@
         }
 
         if (format === 'docx') {
-            // HTML-based Docx Blob fallback
             const htmlDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Doc</title></head><body>${parseMarkdown(rawText)}</body></html>`;
-            downloadBlobFile(htmlDoc, `${filename}.docx`, 'application/msword');
+            downloadBlobFile(htmlDoc, filename.endsWith('.docx') ? filename : `${filename}.docx`, 'application/msword');
             return;
         }
     }
@@ -936,7 +1079,42 @@
         return map[(lang || '').toLowerCase()] || 'txt';
     }
 
-    // Send Message & Streaming Logic with Precision Timer
+    // Single-turn Model / Effort Question Detector
+    function isModelIdentityQuery(text) {
+        if (!text) return false;
+        const lower = text.toLowerCase();
+        return (
+            lower.includes('qué modelo') || lower.includes('que modelo') ||
+            lower.includes('eres opus') || lower.includes('qué versión') ||
+            lower.includes('que version') || lower.includes('what model') ||
+            lower.includes('what version')
+        );
+    }
+
+    function isEffortQuery(text) {
+        if (!text) return false;
+        const lower = text.toLowerCase();
+        return (
+            lower.includes('qué nivel de esfuerzo') || lower.includes('que nivel de esfuerzo') ||
+            lower.includes('estás en alto') || lower.includes('estas en alto') ||
+            lower.includes('qué esfuerzo') || lower.includes('what effort')
+        );
+    }
+
+    // Automatic File Delivery Detection
+    function detectFileGenerationRequest(text) {
+        if (!text) return null;
+        const lower = text.toLowerCase();
+        if (lower.includes('crea un pdf') || lower.includes('haz un pdf') || lower.includes('un libro') || lower.includes('generar pdf')) return 'pdf';
+        if (lower.includes('haz un excel') || lower.includes('crea un excel') || lower.includes('hoja de cálculo') || lower.includes('generar xlsx')) return 'xlsx';
+        if (lower.includes('genera un docx') || lower.includes('crea un word') || lower.includes('documento docx')) return 'docx';
+        if (lower.includes('crea un csv') || lower.includes('generar csv')) return 'csv';
+        if (lower.includes('entrégamelo como html') || lower.includes('crea un html')) return 'html';
+        if (lower.includes('dámelo en txt') || lower.includes('archivo txt')) return 'txt';
+        return null;
+    }
+
+    // Send Message Logic
     async function sendMessage() {
         const cleanApiKey = (apiKey || '').trim();
         if (!cleanApiKey) {
@@ -945,7 +1123,6 @@
             return;
         }
 
-        // Ensure no attachments are currently processing
         if (pendingAttachments.some(att => att.status === 'processing')) {
             alert('Espera a que los archivos terminen de procesarse.');
             return;
@@ -968,10 +1145,13 @@
             elements.activeChatTitle.textContent = conv.title;
         }
 
+        const requestedFileFormat = detectFileGenerationRequest(textPrompt);
+
         const userMsg = {
             role: 'user',
             text: textPrompt,
             attachments: [...validAttachments],
+            requestedFileFormat,
             timestamp: new Date().toISOString()
         };
 
@@ -985,42 +1165,51 @@
         elements.welcomeContainer.style.display = 'none';
 
         elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(userMsg));
+        
+        // Scroll ONCE to bottom when sending new message
         scrollToBottom();
 
-        await executeAssistantStreamingRequest(conv);
+        await executeAssistantStreamingRequest(conv, requestedFileFormat, textPrompt);
     }
 
     async function regenerateLastResponse() {
         const conv = getCurrentConversation();
         if (!conv || conv.messages.length === 0) return;
 
-        // If last message is assistant, pop it
         if (conv.messages[conv.messages.length - 1].role === 'assistant') {
             conv.messages.pop();
             saveConversationsToStorage();
             loadCurrentConversation();
         }
 
-        await executeAssistantStreamingRequest(conv);
+        const lastUserMsg = [...conv.messages].reverse().find(m => m.role === 'user');
+        const requestedFormat = lastUserMsg ? lastUserMsg.requestedFileFormat : null;
+        const promptText = lastUserMsg ? lastUserMsg.text : '';
+
+        await executeAssistantStreamingRequest(conv, requestedFormat, promptText);
     }
 
-    async function executeAssistantStreamingRequest(conv) {
-        const assistantMsgPlaceholder = {
-            role: 'assistant',
-            text: '',
-            durationSeconds: 0,
-            timestamp: new Date().toISOString()
-        };
+    async function executeAssistantStreamingRequest(conv, requestedFileFormat, promptText, isContinuation = false) {
+        let assistantMsgPlaceholder;
 
-        conv.messages.push(assistantMsgPlaceholder);
+        if (isContinuation) {
+            assistantMsgPlaceholder = conv.messages[conv.messages.length - 1];
+        } else {
+            assistantMsgPlaceholder = {
+                role: 'assistant',
+                text: '',
+                durationSeconds: 0,
+                timestamp: new Date().toISOString()
+            };
+            conv.messages.push(assistantMsgPlaceholder);
+            elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(assistantMsgPlaceholder));
+        }
 
-        elements.messagesFeed.insertAdjacentHTML('beforeend', renderMessageHTML(assistantMsgPlaceholder));
         const assistantElems = elements.messagesFeed.querySelectorAll('.message-item.assistant');
         const currentAssistantElem = assistantElems[assistantElems.length - 1];
         const bubbleElem = currentAssistantElem.querySelector('.message-bubble');
         const textContainer = currentAssistantElem.querySelector('.message-text');
 
-        // Precision Timer State
         const startTime = performance.now();
         let animationFrameId = null;
 
@@ -1028,8 +1217,8 @@
             const elapsedSeconds = (performance.now() - startTime) / 1000;
             assistantMsgPlaceholder.durationSeconds = elapsedSeconds;
 
-            const existingThinking = bubbleElem.querySelector('.thinking-accordion');
-            const thinkingHTML = renderThinkingBoxHTML(elapsedSeconds, true);
+            const existingThinking = bubbleElem.querySelector('.thinking-line');
+            const thinkingHTML = renderThinkingLineHTML(elapsedSeconds, true);
 
             if (existingThinking) {
                 existingThinking.outerHTML = thinkingHTML;
@@ -1045,13 +1234,14 @@
         setGeneratingState(true);
         animationFrameId = requestAnimationFrame(updateTimer);
 
-        textContainer.innerHTML = '<span class="streaming-cursor"></span>';
-        scrollToBottom();
+        if (!isContinuation) {
+            textContainer.innerHTML = '<span class="streaming-cursor"></span>';
+        }
 
         // Build Clean Anthropic History Payload
         const messagesHistory = [];
         conv.messages.forEach(m => {
-            if (m === assistantMsgPlaceholder) return;
+            if (m === assistantMsgPlaceholder && !isContinuation) return;
             if (m.role !== 'user' && m.role !== 'assistant') return;
 
             const hasText = m.text && m.text.trim().length > 0;
@@ -1092,7 +1282,27 @@
             });
         });
 
-        // Construct Request Payload
+        if (isContinuation) {
+            messagesHistory.push({
+                role: 'user',
+                content: 'Continúa la respuesta anterior exactamente desde la última palabra sin repetir lo ya generado.'
+            });
+        }
+
+        // Single-turn Identity Injection if asked
+        let systemPrompt = undefined;
+        const modelName = MODELS_MAP[selectedModel] || 'Opus 5 Thinking';
+        const effortName = EFFORT_MAP[selectedEffort] || 'Alto';
+
+        if (isModelIdentityQuery(promptText) && isEffortQuery(promptText)) {
+            systemPrompt = `El modelo seleccionado actualmente es ${modelName} y el nivel de esfuerzo es ${effortName}. Responde únicamente con esa información.`;
+        } else if (isModelIdentityQuery(promptText)) {
+            systemPrompt = `El modelo seleccionado actualmente es ${modelName}. Responde únicamente que eres ${modelName}.`;
+        } else if (isEffortQuery(promptText)) {
+            systemPrompt = `El nivel de esfuerzo seleccionado es ${effortName}. Responde únicamente que utilizas el nivel ${effortName}.`;
+        }
+
+        // Request Payload
         const requestPayload = {
             model: selectedModel,
             max_tokens: 4096,
@@ -1100,10 +1310,14 @@
             stream: true
         };
 
+        if (systemPrompt) {
+            requestPayload.system = systemPrompt;
+        }
+
         abortController = new AbortController();
 
         try {
-            const response = await fetch(API_ENDPOINT, {
+            let response = await fetch(API_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1120,9 +1334,11 @@
             }
 
             const reader = response.body.getReader();
+            activeReader = reader;
             const decoder = new TextDecoder('utf-8');
-            let fullText = '';
+            let accumulatedText = assistantMsgPlaceholder.text || '';
             let buffer = '';
+            let lastStopReason = null;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -1150,60 +1366,51 @@
                                 textChunk = parsed.choices[0].delta.content;
                             }
 
-                            if (textChunk) {
-                                fullText += textChunk;
-                                assistantMsgPlaceholder.text = fullText;
-                                textContainer.innerHTML = parseMarkdown(fullText) + '<span class="streaming-cursor"></span>';
-                                scrollToBottom();
+                            if (parsed.delta && parsed.delta.stop_reason) {
+                                lastStopReason = parsed.delta.stop_reason;
+                            } else if (parsed.stop_reason) {
+                                lastStopReason = parsed.stop_reason;
                             }
-                        } catch (e) {
-                            // Ignore partial JSON chunks
-                        }
+
+                            if (textChunk) {
+                                accumulatedText += textChunk;
+                                assistantMsgPlaceholder.text = accumulatedText;
+                                textContainer.innerHTML = parseMarkdown(accumulatedText) + '<span class="streaming-cursor"></span>';
+                            }
+                        } catch (e) {}
                     }
                 }
             }
 
-            // Finished streaming
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
             const finalDuration = (performance.now() - startTime) / 1000;
-            assistantMsgPlaceholder.durationSeconds = finalDuration;
-            assistantMsgPlaceholder.text = fullText;
+            assistantMsgPlaceholder.durationSeconds = (assistantMsgPlaceholder.durationSeconds || 0) + finalDuration;
+            assistantMsgPlaceholder.text = accumulatedText;
 
-            // Final render
-            bubbleElem.innerHTML = `
-                ${renderThinkingBoxHTML(finalDuration, false)}
-                <div class="message-text">${parseMarkdown(fullText)}</div>
-                <div class="message-actions">
-                    <button class="action-icon-btn copy-msg-btn" data-text="${encodeURIComponent(fullText)}">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        <span>Copiar</span>
-                    </button>
-                    
-                    <div class="download-wrapper">
-                        <button class="action-icon-btn download-trigger-btn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                            <span>Descargar como ▾</span>
-                        </button>
-                        <div class="download-menu hidden">
-                            <button class="download-option" data-fmt="pdf" data-text="${encodeURIComponent(fullText)}">Documento PDF (.pdf)</button>
-                            <button class="download-option" data-fmt="docx" data-text="${encodeURIComponent(fullText)}">Documento Word (.docx)</button>
-                            <button class="download-option" data-fmt="xlsx" data-text="${encodeURIComponent(fullText)}">Hoja Excel (.xlsx)</button>
-                            <button class="download-option" data-fmt="csv" data-text="${encodeURIComponent(fullText)}">Tabla CSV (.csv)</button>
-                            <button class="download-option" data-fmt="md" data-text="${encodeURIComponent(fullText)}">Markdown (.md)</button>
-                            <button class="download-option" data-fmt="txt" data-text="${encodeURIComponent(fullText)}">Texto (.txt)</button>
-                            <button class="download-option" data-fmt="html" data-text="${encodeURIComponent(fullText)}">Página Web (.html)</button>
-                        </div>
-                    </div>
+            // Handle Auto Continuation if max_tokens reached
+            if (lastStopReason === 'max_tokens' || lastStopReason === 'length') {
+                saveConversationsToStorage();
+                return await executeAssistantStreamingRequest(conv, requestedFileFormat, promptText, true);
+            }
 
-                    <button class="action-icon-btn regenerate-btn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                        <span>Regenerar</span>
-                    </button>
-                </div>
-            `;
+            // Automatic File Delivery Card Creation
+            if (requestedFileFormat) {
+                const extMap = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', csv: 'csv', html: 'html', txt: 'txt' };
+                const fmtExt = extMap[requestedFileFormat] || 'file';
+                const fileCardName = `documento-aizen.${fmtExt}`;
+
+                assistantMsgPlaceholder.generatedFile = {
+                    name: fileCardName,
+                    typeLabel: `Documento ${fmtExt.toUpperCase()}`,
+                    size: formatFileSize(accumulatedText.length),
+                    format: requestedFileFormat,
+                    content: accumulatedText
+                };
+            }
 
             saveConversationsToStorage();
             renderConversationsList();
+            loadCurrentConversation();
 
         } catch (err) {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -1213,27 +1420,35 @@
             } else {
                 console.error('API Request Error:', err);
                 showError('Error en la solicitud API', err.message);
-                conv.messages.pop();
+                if (!assistantMsgPlaceholder.text) conv.messages.pop();
             }
             saveConversationsToStorage();
         } finally {
             setGeneratingState(false);
             abortController = null;
+            activeReader = null;
             updateSendBtnState();
         }
     }
 
     function stopGeneration() {
         if (abortController) {
-            abortController.abort();
+            try { abortController.abort(); } catch(e) {}
         }
+        if (activeReader) {
+            try { activeReader.cancel(); } catch(e) {}
+        }
+        setGeneratingState(false);
+        abortController = null;
+        activeReader = null;
+        updateSendBtnState();
     }
 
     function setGeneratingState(generating) {
         isGenerating = generating;
         updateSendBtnState();
         if (generating) {
-            elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
+            elements.sendBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
             elements.sendBtn.title = 'Detener';
         } else {
             elements.sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
